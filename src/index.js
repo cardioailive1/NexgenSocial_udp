@@ -51,11 +51,18 @@ app.use((err, _req, res, _next) => {
 const PORT = process.env.PORT || 4000;
 const server = require("http").createServer(app);
 
+// Start listening FIRST, unconditionally -- Fly (and most PaaS health
+// checks) expect the port to open quickly and independently of anything
+// else. mediasoup worker startup spawns a separate OS process and talks to
+// it over a pipe, which is slower and has more ways to fail (resource
+// limits, missing shared libs, port binding issues) than plain HTTP setup.
+// Gating server.listen() on that finishing first meant a slow or hung
+// mediasoup init could prevent the port from ever opening at all, which is
+// worse than losing live streaming while everything else stays up.
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`NexgenSocial API listening on :${PORT}`);
+});
+
 attachSignaling(server)
-  .then(() => {
-    server.listen(PORT, () => console.log(`NexgenSocial API listening on :${PORT} (HTTP + live-stream SFU signaling at /ws/live)`));
-  })
-  .catch((err) => {
-    console.error("Failed to start the live-stream SFU -- starting the rest of the API anyway:", err);
-    server.listen(PORT, () => console.log(`NexgenSocial API listening on :${PORT} (live streaming unavailable)`));
-  });
+  .then(() => console.log("Live-stream SFU signaling attached at /ws/live"))
+  .catch((err) => console.error("Live-stream SFU failed to start -- rest of the API is unaffected:", err));
