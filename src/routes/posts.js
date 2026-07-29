@@ -17,7 +17,13 @@ const storage = multer.diskStorage({
     cb(null, `${unique}${path.extname(file.originalname) || ".webm"}`);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 200 * 1024 * 1024 } }); // 200MB cap
+// 500MB cap. A 10-minute in-browser recording (see MAX_SECONDS in
+// QuickVideoRecorder.jsx) can realistically approach or exceed 200MB
+// depending on the browser's default bitrate and camera resolution --
+// this leaves real headroom instead of the two limits fighting each
+// other, where a recording finishes fine but then fails at the very last
+// step (upload) with a confusing error.
+const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
 
 const postAuthorSelect = { id: true, username: true, displayName: true, avatarUrl: true };
 
