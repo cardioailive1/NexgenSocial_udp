@@ -28,12 +28,18 @@ RUN npx prisma generate
 
 EXPOSE 4000
 
-# Run pending migrations, then start the server -- every time the
-# container boots, not as a separate manual step. This avoids needing SSH
-# access to the running machine just to get the schema applied (Prisma's
-# migrate deploy is safe to run repeatedly: it no-ops if there's nothing
-# new to apply, so this doesn't redo work or risk data on every restart).
-# Requires DATABASE_URL to already be set (see FLY_DEPLOY.md) -- without
-# it, this fails fast with a clear error instead of the server starting
-# and failing every request individually.
-CMD ["sh", "-c", "npx prisma migrate deploy && node src/index.js"]
+# `prisma migrate deploy` only applies migration *files* -- this project
+# was never run through `prisma migrate dev` locally (that needs a live DB
+# connection to generate them), so prisma/migrations/ is empty and deploy
+# had nothing to apply, even though it connected fine. `db push` instead
+# syncs the schema directly against the database using the same engine, no
+# migration files required. It refuses to run (rather than silently
+# dropping data) if a future schema change would be destructive, unless
+# --accept-data-loss is passed -- which is NOT set here on purpose, so
+# you'll see it fail loudly rather than lose data if that ever comes up.
+# Once the schema stabilizes, switching to real versioned migrations
+# (`prisma migrate dev` run locally against a real DB, committing the
+# resulting prisma/migrations/ folder, then back to `migrate deploy` here)
+# is the standard next step for a production app -- db push is the right
+# tool for right now, not forever.
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node src/index.js"]
