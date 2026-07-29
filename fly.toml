@@ -58,3 +58,17 @@ primary_region = "iad"       # change to whichever region you launch in
   cpu_kind = "shared"
   cpus = 1
   memory_mb = 1024
+
+# Uploaded photos/videos live on disk at src/uploads (see routes/posts.js
+# and routes/users.js) -- without this, that's the container's own
+# filesystem, which is wiped on every restart or redeploy. Any of the many
+# secret-setting redeploys during initial setup would have silently
+# deleted every uploaded file up to that point, even though the database
+# rows pointing at them survive fine (in Postgres, which is separate).
+# This volume is what makes uploads actually durable. Create it once with
+# `fly volumes create nexgensocial_uploads --size 1 -a <your-app-name>`
+# (see FLY_DEPLOY.md) BEFORE deploying this config -- deploying with a
+# [[mounts]] block that references a volume that doesn't exist yet fails.
+[[mounts]]
+  source = "nexgensocial_uploads"
+  destination = "/app/src/uploads"
