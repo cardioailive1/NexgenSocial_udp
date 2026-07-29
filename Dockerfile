@@ -28,4 +28,12 @@ RUN npx prisma generate
 
 EXPOSE 4000
 
-CMD ["node", "src/index.js"]
+# Run pending migrations, then start the server -- every time the
+# container boots, not as a separate manual step. This avoids needing SSH
+# access to the running machine just to get the schema applied (Prisma's
+# migrate deploy is safe to run repeatedly: it no-ops if there's nothing
+# new to apply, so this doesn't redo work or risk data on every restart).
+# Requires DATABASE_URL to already be set (see FLY_DEPLOY.md) -- without
+# it, this fails fast with a clear error instead of the server starting
+# and failing every request individually.
+CMD ["sh", "-c", "npx prisma migrate deploy && node src/index.js"]
