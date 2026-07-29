@@ -55,25 +55,40 @@ anywhere — UDP is only needed for the actual audio/video packets.
      MEDIASOUP_ANNOUNCED_IP="<the IP from step 2>"
    ```
 
-4. **Deploy:**
+4. **Create the persistent volume for uploaded photos/videos** (do this
+   BEFORE the first deploy below -- `fly.toml` references this volume by
+   name, and deploying before it exists will fail):
+   ```bash
+   fly volumes create nexgensocial_uploads --size 1 -a nexgensocial-udp --region iad
+   ```
+   Use the same region as `primary_region` in `fly.toml`. 1GB is plenty to
+   start; resize later with `fly volumes extend` if needed. Without this,
+   every uploaded photo/video lives on the container's own disk and is
+   silently deleted on the next restart or redeploy -- the post/database
+   record survives, but the actual file doesn't, which shows up as a
+   broken image or video player.
+
+5. **Deploy:**
    ```bash
    fly deploy
    ```
    Watch the build logs — this is where mediasoup compiles its native
    worker binary, which takes a minute or two the first time.
 
-5. **Run the database migration** (first deploy only, or after schema
-   changes):
-   ```bash
-   fly ssh console -C "npx prisma migrate deploy"
-   ```
+6. **The schema syncs to the database automatically on every boot** -- the
+   container's startup command is `npx prisma db push && node src/index.js`,
+   so there's no separate manual step needed here, on this deploy or after
+   most schema changes. (This project doesn't use versioned migration files
+   yet -- `db push` syncs the schema directly. If `DATABASE_URL` isn't set
+   correctly, you'll see that fail clearly in the boot logs, rather than
+   the server starting and every individual request failing instead.)
 
-6. **Point your frontend at this backend.** Wherever the frontend is
+7. **Point your frontend at this backend.** Wherever the frontend is
    deployed (Render, etc.), set `VITE_API_URL` to
    `https://<your-app-name>.fly.dev` and redeploy it (Vite bakes this in
    at build time, so a plain restart isn't enough).
 
-7. **Sanity-check it actually works:**
+8. **Sanity-check it actually works:**
    ```bash
    curl https://<your-app-name>.fly.dev/health
    ```
