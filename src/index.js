@@ -65,6 +65,15 @@ app.use("/api/livestreams", livestreamRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);
+  // Multer's file-size limit and our own fileFilter validation messages
+  // (e.g. "Profile photo must be an image.") are safe and useful to show
+  // as-is; anything else stays generic so we don't leak internals.
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ error: "That file is too large." });
+  }
+  if (err.message && err.message.includes("must be")) {
+    return res.status(400).json({ error: err.message });
+  }
   res.status(500).json({ error: "Something went wrong on our end." });
 });
 
