@@ -49,7 +49,12 @@ primary_region = "iad"       # change to whichever region you launch in
   [[services.ports]]
     port = 44444
 
+# 512MB was too tight for Node + Prisma + a mediasoup worker running
+# together in practice -- it showed up as the mediasoup worker getting
+# OOM-killed, which (before a related code fix) crashed the whole process
+# and caused a restart loop. 1024MB is a safer floor; Fly's shared-cpu-1x
+# plan supports up to 2048MB if streams still misbehave under load.
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 512
+  memory_mb = 1024
