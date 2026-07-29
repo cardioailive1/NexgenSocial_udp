@@ -1,8 +1,29 @@
 const express = require("express");
+const multer = require("multer");
+const path = require("path");
 const prisma = require("../lib/prisma");
 const { requireAuth, optionalAuth } = require("../middleware/auth");
 
 const router = express.Router();
+
+// Same local-disk pattern as post media uploads (see routes/posts.js for
+// the same production caveat: this is ephemeral on hosts like Fly/Render
+// and should move to S3-compatible storage before relying on it long-term).
+const avatarStorage = multer.diskStorage({
+  destination: path.join(__dirname, "..", "uploads"),
+  filename: (req, file, cb) => {
+    const unique = `avatar-${req.userId}-${Date.now()}`;
+    cb(null, `${unique}${path.extname(file.originalname) || ".jpg"}`);
+  },
+});
+const uploadAvatar = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB is plenty for a profile photo
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) return cb(new Error("Profile photo must be an image."));
+    cb(null, true);
+  },
+});
 
 function publicUser(user) {
   const { passwordHash, ...rest } = user;
@@ -63,6 +84,14 @@ router.get("/:username", optionalAuth, async (req, res) => {
     stats: { followerCount, followingCount, friendCount },
     viewerContext,
   });
+});
+
+router.post("/me/avatar", requireAuth, uploadAvatar.single("avatar"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No image file was received." });
+
+  const avatarUrl = `/uploads/${req.file.filename}`;
+  const user = await prisma.user.update({ where: { id: req.userId }, data: { avatarUrl } });
+  res.status(201).json({ user: publicUser(user) });
 });
 
 router.patch("/me", requireAuth, async (req, res) => {
