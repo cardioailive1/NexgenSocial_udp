@@ -1,4 +1,13 @@
 require("dotenv").config();
+// Must be required before any routes are defined. Patches Express so an
+// error thrown inside an `async` route handler is caught and forwarded to
+// the error-handling middleware below, instead of becoming an unhandled
+// promise rejection -- which, left unhandled, crashes the entire Node
+// process (not just that one request) as of Node 15+. Verified this both
+// ways: without this, one bad request (e.g. a Prisma error) took the whole
+// server down mid-response; with it, the same error returns a clean 500
+// and the server keeps running.
+require("express-async-errors");
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
@@ -17,6 +26,17 @@ const newsRoutes = require("./routes/news");
 const sportsRoutes = require("./routes/sports");
 const livestreamRoutes = require("./routes/livestreams");
 const { attachSignaling } = require("./livestreamSignaling");
+
+// Belt-and-suspenders: express-async-errors covers anything thrown inside
+// a route handler, but this catches anything else that might reject
+// outside that cycle (a stray timer, a background task) so it can never
+// silently take the whole process down again.
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled promise rejection (process staying alive):", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception (process staying alive):", err);
+});
 
 const app = express();
 
