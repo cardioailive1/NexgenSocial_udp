@@ -37,8 +37,21 @@ async function initWorkers() {
   for (let i = 0; i < WORKER_COUNT; i++) {
     const worker = await mediasoup.createWorker({ logLevel: "warn" });
     worker.on("died", () => {
-      console.error(`mediasoup worker ${worker.pid} died -- exiting so the process manager restarts us`);
-      setTimeout(() => process.exit(1), 1000);
+      // A dead mediasoup worker used to force-exit this entire process
+      // (auth, posts, everything) on the theory that Fly would restart us
+      // into a clean state. In practice that meant any OOM kill of just
+      // the worker subprocess (a real risk on a small VM -- see fly.toml)
+      // took the whole API down with it, and if it kept getting OOM-killed
+      // on every restart, that's a crash loop, not a recovery. Log loudly
+      // instead and keep the rest of the app running -- live streaming
+      // degrades for new streams until the next deploy/restart, but
+      // signup, login, posts, everything else keeps working.
+      console.error(
+        `mediasoup worker ${worker.pid} died. Live streaming is now degraded ` +
+        "until this process restarts (the rest of the API is unaffected). " +
+        "If this keeps happening, the machine likely doesn't have enough " +
+        "memory for a mediasoup worker -- see fly.toml [[vm]] memory_mb."
+      );
     });
 
     const port = BASE_WEBRTC_PORT + i; // each worker needs its own port
