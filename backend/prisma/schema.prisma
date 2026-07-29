@@ -1,0 +1,342 @@
+// NexgenSocial - Prisma schema
+// Run `npx prisma migrate dev` locally, `npx prisma migrate deploy` on Render.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FriendStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+enum PostType {
+  TEXT
+  VIDEO
+  IMAGE
+}
+
+enum SubscriptionTier {
+  FREE
+  PREMIUM
+}
+
+enum GroupRole {
+  MEMBER
+  ADMIN
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  username      String   @unique
+  passwordHash  String
+  displayName   String
+  bio           String?
+  avatarUrl     String?
+  coverUrl      String?
+  tier          SubscriptionTier @default(FREE)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  posts             Post[]
+  comments          Comment[]
+  likes             Like[]
+
+  sentFriendReqs     FriendRequest[] @relation("SentFriendReqs")
+  receivedFriendReqs FriendRequest[] @relation("ReceivedFriendReqs")
+
+  following     Follow[] @relation("Following")
+  followers     Follow[] @relation("Followers")
+
+  groupMemberships GroupMember[]
+  groupsOwned       Group[] @relation("GroupOwner")
+
+  ads           Ad[]
+  marketListings MarketListing[]
+
+  socialAccounts SocialAccount[]
+  invitesSent    Invite[]
+
+  feedWeights Json @default("{\"recency\":0.5,\"engagement\":0.3,\"diversity\":0.2}")
+
+  circlesOwned  Circle[]
+  circleMemberships CircleMember[]
+  contextNotes  ContextNote[]
+  noteVotes     NoteVote[]
+  livestreams   Livestream[]
+}
+
+model FriendRequest {
+  id          String       @id @default(cuid())
+  sender      User         @relation("SentFriendReqs", fields: [senderId], references: [id])
+  senderId    String
+  receiver    User         @relation("ReceivedFriendReqs", fields: [receiverId], references: [id])
+  receiverId  String
+  status      FriendStatus @default(PENDING)
+  createdAt   DateTime     @default(now())
+  respondedAt DateTime?
+
+  @@unique([senderId, receiverId])
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  follower    User     @relation("Following", fields: [followerId], references: [id])
+  followerId  String
+  following   User     @relation("Followers", fields: [followingId], references: [id])
+  followingId String
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, followingId])
+}
+
+enum PostAudience {
+  PUBLIC
+  FRIENDS
+  FOLLOWERS
+  CIRCLE
+}
+
+enum PostCategory {
+  GENERAL
+  SPORTS
+  CELEBRITY
+  NEWS
+}
+
+model Post {
+  id         String   @id @default(cuid())
+  author     User     @relation(fields: [authorId], references: [id])
+  authorId   String
+  type       PostType @default(TEXT)
+  body       String?
+  mediaUrl   String?
+  group      Group?   @relation(fields: [groupId], references: [id])
+  groupId    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  audience   PostAudience @default(PUBLIC)
+  circle     Circle?      @relation(fields: [circleId], references: [id])
+  circleId   String?
+  category   PostCategory @default(GENERAL)
+
+  isAiGenerated Boolean @default(false)
+  aiTool        String?
+  editedAt      DateTime?
+
+  comments   Comment[]
+  likes      Like[]
+  revisions  PostRevision[]
+  contextNotes ContextNote[]
+}
+
+// A snapshot of a post's body taken every time it's edited, so edits are
+// never silent -- anyone can see exactly what changed and when.
+model PostRevision {
+  id        String   @id @default(cuid())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  body      String?
+  editedAt  DateTime @default(now())
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+}
+
+model Like {
+  id       String @id @default(cuid())
+  post     Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId   String
+  user     User   @relation(fields: [userId], references: [id])
+  userId   String
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+}
+
+model Group {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  coverUrl    String?
+  isPrivate   Boolean  @default(false)
+  owner       User     @relation("GroupOwner", fields: [ownerId], references: [id])
+  ownerId     String
+  createdAt   DateTime @default(now())
+
+  members     GroupMember[]
+  posts       Post[]
+}
+
+model GroupMember {
+  id       String    @id @default(cuid())
+  group    Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId  String
+  user     User      @relation(fields: [userId], references: [id])
+  userId   String
+  role     GroupRole @default(MEMBER)
+  joinedAt DateTime  @default(now())
+
+  @@unique([groupId, userId])
+}
+
+// --- Premium surfaces (scaffolded: schema + CRUD exist, UI is a starting point) ---
+
+enum AdCategory {
+  BUSINESS
+  POLITICAL
+  GENERAL
+}
+
+model Ad {
+  id         String     @id @default(cuid())
+  owner      User       @relation(fields: [ownerId], references: [id])
+  ownerId    String
+  category   AdCategory @default(GENERAL)
+  headline   String
+  body       String
+  imageUrl   String?
+  targetUrl  String?
+  active     Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+}
+
+model MarketListing {
+  id          String   @id @default(cuid())
+  seller      User     @relation(fields: [sellerId], references: [id])
+  sellerId    String
+  title       String
+  description String
+  priceCents  Int
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+}
+
+// --- Linked social accounts & invites ---
+
+enum SocialProvider {
+  FACEBOOK
+  INSTAGRAM
+  X
+  LINKEDIN
+  TIKTOK
+  GOOGLE
+}
+
+// Represents one external account linked to a NexgenSocial user.
+// providerUserId/accessToken are populated by a real OAuth flow in
+// production (see backend/src/routes/social.js for the seam); for now
+// connect() creates this record directly so the UI is fully functional.
+model SocialAccount {
+  id             String         @id @default(cuid())
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String
+  provider       SocialProvider
+  providerUserId String?
+  displayName    String?
+  accessToken    String? // set by a real OAuth exchange; never expose to the frontend
+  connectedAt    DateTime       @default(now())
+
+  @@unique([userId, provider])
+}
+
+enum InviteStatus {
+  SENT
+  ACCEPTED
+}
+
+model Invite {
+  id        String       @id @default(cuid())
+  sender    User         @relation(fields: [senderId], references: [id])
+  senderId  String
+  token     String       @unique @default(cuid())
+  channel   String // "email" | "sms" | "link"
+  contact   String? // email address or phone number, if provided
+  status    InviteStatus @default(SENT)
+  createdAt DateTime     @default(now())
+  acceptedById String?
+}
+
+// --- Custom audience circles (finer-grained than public/friends/followers) ---
+
+model Circle {
+  id        String   @id @default(cuid())
+  name      String
+  owner     User     @relation(fields: [ownerId], references: [id])
+  ownerId   String
+  createdAt DateTime @default(now())
+
+  members   CircleMember[]
+  posts     Post[]
+}
+
+model CircleMember {
+  id       String @id @default(cuid())
+  circle   Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  circleId String
+  user     User   @relation(fields: [userId], references: [id])
+  userId   String
+
+  @@unique([circleId, userId])
+}
+
+// --- Crowd-sourced context notes (platform-wide, on any post) ---
+
+model ContextNote {
+  id        String   @id @default(cuid())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  votes     NoteVote[]
+}
+
+model NoteVote {
+  id        String      @id @default(cuid())
+  note      ContextNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  noteId    String
+  user      User        @relation(fields: [userId], references: [id])
+  userId    String
+  value     Int // 1 = helpful, -1 = not helpful
+  createdAt DateTime    @default(now())
+
+  @@unique([noteId, userId])
+}
+
+// --- Live streams: real-time video via WebRTC, signaled through this
+// server's WebSocket endpoint (see backend/src/livestreamSignaling.js).
+// Peer-to-peer mesh scales to a handful of concurrent viewers per host --
+// see the README for what a real broadcast-scale setup needs.
+
+enum LivestreamStatus {
+  LIVE
+  ENDED
+}
+
+model Livestream {
+  id        String           @id @default(cuid())
+  host      User             @relation(fields: [hostId], references: [id])
+  hostId    String
+  title     String
+  status    LivestreamStatus @default(LIVE)
+  startedAt DateTime         @default(now())
+  endedAt   DateTime?
+}
