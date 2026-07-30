@@ -91,7 +91,14 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads"), {
   },
 }));
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/health", (_req, res) => res.json({
+  ok: true,
+  // Temporary diagnostic: shows exactly what CORS origins the server is
+  // actually configured with right now, to settle typo/trailing-slash/
+  // stale-deploy questions definitively instead of by inspection. Remove
+  // this field once CORS is confirmed working end to end.
+  allowedOrigins,
+}));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
