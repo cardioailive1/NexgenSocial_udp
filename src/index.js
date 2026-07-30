@@ -63,7 +63,33 @@ app.use(morgan("tiny"));
 
 // Served statically for local dev. In production, point mediaUrl at your
 // object-storage bucket instead (see routes/posts.js note).
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Explicit Content-Type + Cross-Origin-Resource-Policy headers matter here
+// specifically because the frontend and this API are on genuinely
+// different domains (a custom domain + fly.dev). Express's default static
+// serving doesn't reliably set a correct Content-Type for .webm on every
+// platform, and without a Content-Type the browser can't confirm a
+// cross-origin subresource is safe to render as media -- Firefox's Opaque
+// Response Blocking (and Chrome has an equivalent) silently drops it
+// rather than play it, even though the file itself is completely fine
+// (confirmed: it loads and plays when navigated to directly, since that's
+// a top-level request, not a blocked cross-origin subresource load).
+const UPLOAD_MIME_TYPES = {
+  ".webm": "video/webm",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+app.use("/uploads", express.static(path.join(__dirname, "uploads"), {
+  setHeaders: (res, filePath) => {
+    const ext = path.extname(filePath).toLowerCase();
+    if (UPLOAD_MIME_TYPES[ext]) res.setHeader("Content-Type", UPLOAD_MIME_TYPES[ext]);
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  },
+}));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
