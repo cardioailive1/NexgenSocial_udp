@@ -40,7 +40,24 @@ process.on("uncaughtException", (err) => {
 
 const app = express();
 
-app.use(cors({ origin: process.env.CLIENT_URL || "*" }));
+// CLIENT_URL can be a single origin or a comma-separated list (e.g. both
+// your Render .onrender.com URL and a custom domain at once) -- a plain
+// single-string match broke the moment a second, equally valid frontend
+// origin (a custom domain) started being used alongside the original one.
+const allowedOrigins = (process.env.CLIENT_URL || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // no Origin header (server-to-server calls, curl, health checks) -- allow
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.length === 0) return callback(null, true); // CLIENT_URL not set: allow all (dev-friendly default)
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error("Not allowed by CORS"));
+  },
+}));
 app.use(express.json());
 app.use(morgan("tiny"));
 
