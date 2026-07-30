@@ -31,10 +31,26 @@ async function main() {
   console.log(`Seeded ${INTERESTS.length} interests.`);
 }
 
-main()
+// A hard timeout matters here because this runs during container boot: if
+// the DB connection hangs rather than failing outright, an un-timed-out
+// script would block the server from ever starting. Failing fast and
+// letting the app boot without interests is strictly better than hanging.
+const SEED_TIMEOUT_MS = 30000;
+
+const timeout = new Promise((_, reject) =>
+  setTimeout(() => reject(new Error(`Seeding timed out after ${SEED_TIMEOUT_MS}ms`)), SEED_TIMEOUT_MS)
+);
+
+Promise.race([main(), timeout])
   .catch((err) => {
     // Don't hard-fail the boot over seeding -- the app works fine without
     // interests, they just won't be selectable until this succeeds.
     console.error("Interest seeding failed (continuing anyway):", err.message);
   })
-  .finally(() => prisma.$disconnect());
+  .finally(async () => {
+    // Await the disconnect and then exit explicitly. Without this the
+    // process can linger on an open connection handle and never exit,
+    // which during boot means the server never starts.
+    try { await prisma.$disconnect(); } catch {}
+    process.exit(0);
+  });
