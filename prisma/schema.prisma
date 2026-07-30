@@ -71,6 +71,104 @@ model User {
   contextNotes  ContextNote[]
   noteVotes     NoteVote[]
   livestreams   Livestream[]
+
+  // --- Extended profile (all optional: nothing here is required to use
+  // the platform, and each field is only collected if the person fills it
+  // in themselves) ---
+  birthDate        DateTime?
+  gender           String?
+  relationshipStatus RelationshipStatus?
+  occupation       String?
+  education        String?
+  // Free-text city/country the person types themselves -- distinct from
+  // any device-derived location, which is opt-in and stored separately.
+  city             String?
+  country          String?
+  // IANA timezone (e.g. "America/New_York") so the UI can show the
+  // person's real local time rather than the viewer's.
+  timezone         String?
+  hasChildren      Boolean?
+
+  interests        UserInterest[]
+  visitedPlaces    VisitedPlace[]
+  adEvents         AdEvent[]
+  privacySettings  PrivacySettings?
+}
+
+enum RelationshipStatus {
+  SINGLE
+  IN_RELATIONSHIP
+  ENGAGED
+  MARRIED
+  DOMESTIC_PARTNERSHIP
+  SEPARATED
+  DIVORCED
+  WIDOWED
+  PREFER_NOT_TO_SAY
+}
+
+// A shared, finite tag list so ad targeting can match on stable IDs rather
+// than fuzzy free text.
+model Interest {
+  id       String         @id @default(cuid())
+  name     String         @unique
+  category String?
+  users    UserInterest[]
+  adTargets AdTargetInterest[]
+}
+
+model UserInterest {
+  id         String   @id @default(cuid())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  interest   Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+  interestId String
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, interestId])
+}
+
+// Places the person explicitly chooses to save. This is deliberately NOT
+// passive/background location tracking: each row is created by an
+// intentional "I visited here" action, which is both far less invasive and
+// far simpler to justify under GDPR/CCPA than continuous device tracking.
+model VisitedPlace {
+  id         String   @id @default(cuid())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  name       String
+  address    String?
+  latitude   Float
+  longitude  Float
+  // Provider place identifiers, when the place came from a maps search
+  googlePlaceId String?
+  appleMapsId   String?
+  visitedAt  DateTime @default(now())
+  note       String?
+  isPublic   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+// Per-user consent flags. Defaults are deliberately OFF for anything
+// beyond basic in-platform targeting, so consent is opt-in rather than
+// opt-out -- which is what GDPR actually requires, and is much easier to
+// build in from the start than retrofit later.
+model PrivacySettings {
+  id                   String  @id @default(cuid())
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId               String  @unique
+  // Allow demographics/interests to inform which ads are shown in-app.
+  allowInterestTargeting Boolean @default(false)
+  // Allow recording which ads/posts were viewed & clicked, for relevance
+  // and advertiser conversion reporting.
+  allowBehavioralTracking Boolean @default(false)
+  // Allow this account's data to contribute to ANONYMOUS, AGGREGATE
+  // audience counts shown to advertisers (never individual profiles --
+  // see the k-anonymity threshold in routes/adsTargeting.js).
+  allowAggregateInsights  Boolean @default(false)
+  // Show the person's saved places on their public profile.
+  showVisitedPlaces       Boolean @default(false)
+  updatedAt            DateTime @updatedAt
 }
 
 model FriendRequest {
@@ -214,6 +312,55 @@ model Ad {
   targetUrl  String?
   active     Boolean    @default(true)
   createdAt  DateTime   @default(now())
+
+  // --- Targeting criteria (all optional; omitting one means "don't filter
+  // on this dimension" rather than "match nobody") ---
+  targetMinAge      Int?
+  targetMaxAge      Int?
+  targetGenders     String[] // empty array = any
+  targetCities      String[] // empty array = any
+  targetCountries   String[]
+  targetRelationshipStatuses String[]
+  targetInterests   AdTargetInterest[]
+
+  events            AdEvent[]
+}
+
+model AdTargetInterest {
+  id         String   @id @default(cuid())
+  ad         Ad       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  adId       String
+  interest   Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+  interestId String
+
+  @@unique([adId, interestId])
+}
+
+enum AdEventType {
+  IMPRESSION
+  CLICK
+  CONVERSION
+}
+
+// Behavioral + conversion tracking. Only written when the person's
+// PrivacySettings.allowBehavioralTracking is true -- enforced in
+// routes/adsTargeting.js, not just by convention.
+model AdEvent {
+  id        String      @id @default(cuid())
+  ad        Ad          @relation(fields: [adId], references: [id], onDelete: Cascade)
+  adId      String
+  // Nullable so an event can be retained for advertiser counts even if the
+  // user later deletes their account (the row is anonymized, not orphaned).
+  user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId    String?
+  type      AdEventType
+  // For CONVERSION events: optional value (e.g. order total in cents) so
+  // advertisers can measure ROI, not just raw conversion counts.
+  valueCents Int?
+  createdAt DateTime    @default(now())
+
+  @@index([adId, type])
+  @@index([userId])
 }
 
 model MarketListing {
