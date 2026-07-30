@@ -42,4 +42,12 @@ EXPOSE 4000
 # resulting prisma/migrations/ folder, then back to `migrate deploy` here)
 # is the standard next step for a production app -- db push is the right
 # tool for right now, not forever.
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node prisma/seedInterests.js && node src/index.js"]
+# Chaining these with && was a mistake: it meant a failure in EITHER the
+# schema push or the interest seeding prevented the server from starting at
+# all, so the app stopped listening entirely and the host reported
+# "instance refused connection" -- turning a recoverable data-layer hiccup
+# into a total outage. Now each prep step logs its failure and execution
+# continues regardless; the server always gets to start. A failed db push
+# means some queries error until it's fixed, which is far better than the
+# whole API being unreachable.
+CMD ["sh", "-c", "npx prisma db push --skip-generate || echo 'WARNING: prisma db push failed -- starting server anyway'; node prisma/seedInterests.js || echo 'WARNING: interest seeding failed -- starting server anyway'; node src/index.js"]
