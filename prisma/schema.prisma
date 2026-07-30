@@ -93,6 +93,11 @@ model User {
   visitedPlaces    VisitedPlace[]
   adEvents         AdEvent[]
   privacySettings  PrivacySettings?
+
+  reels            Reel[]
+  reelViews        ReelView[]
+  reelLikes        ReelLike[]
+  reelComments     ReelComment[]
 }
 
 enum RelationshipStatus {
@@ -486,4 +491,109 @@ model Livestream {
   status    LivestreamStatus @default(LIVE)
   startedAt DateTime         @default(now())
   endedAt   DateTime?
+}
+
+// --- Reels: short-form vertical video, optimized for discovery ---------
+//
+// Kept as its own model rather than reusing Post, because the ranking
+// signals are fundamentally different. A feed post ranks on who you follow;
+// a reel ranks on completion rate and replays from people who DON'T follow
+// you -- that's what makes it a top-of-funnel growth tool rather than
+// another way to reach your existing audience.
+
+model Reel {
+  id          String   @id @default(cuid())
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId    String
+  videoUrl    String
+  thumbnailUrl String?
+  caption     String?
+  // Duration in seconds, recorded at publish time so ranking can compute
+  // completion rate without probing the file on every request.
+  durationSec Float?
+
+  // Audio attribution. There is deliberately no bundled music catalog --
+  // see the README: a "trending sounds" library requires actual licensing
+  // deals with rights holders. This records what the creator supplied.
+  soundName   String?
+  soundArtist String?
+  // True when the audio is the creator's own recording rather than an
+  // uploaded track, so the UI can label it honestly.
+  isOriginalAudio Boolean @default(true)
+
+  // Editing metadata, retained so a reel can be re-edited later without
+  // re-uploading, and so "remix this" style features have something to
+  // work from.
+  colorGrade  String?  // named preset, e.g. "warm", "noir"
+  createdAt   DateTime @default(now())
+
+  hashtags    ReelHashtag[]
+  views       ReelView[]
+  likes       ReelLike[]
+  comments    ReelComment[]
+
+  @@index([createdAt])
+  @@index([authorId])
+}
+
+model Hashtag {
+  id        String        @id @default(cuid())
+  tag       String        @unique // stored lowercase, without the leading '#'
+  createdAt DateTime      @default(now())
+  reels     ReelHashtag[]
+}
+
+model ReelHashtag {
+  id        String  @id @default(cuid())
+  reel      Reel    @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  reelId    String
+  hashtag   Hashtag @relation(fields: [hashtagId], references: [id], onDelete: Cascade)
+  hashtagId String
+
+  @@unique([reelId, hashtagId])
+  @@index([hashtagId])
+}
+
+// The core discoverability signal. Watch time and completion matter far
+// more than likes for short-form ranking: a reel someone watched twice all
+// the way through is a stronger quality signal than a passive like.
+model ReelView {
+  id            String   @id @default(cuid())
+  reel          Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  reelId        String
+  viewer        User?    @relation(fields: [viewerId], references: [id], onDelete: SetNull)
+  viewerId      String?
+  watchedSec    Float    @default(0)
+  completed     Boolean  @default(false)
+  replayCount   Int      @default(0)
+  // Whether the viewer followed the author at view time -- lets ranking
+  // measure reach to NEW audiences specifically, which is the whole point.
+  viewerFollowedAuthor Boolean @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([reelId])
+  @@unique([reelId, viewerId])
+}
+
+model ReelLike {
+  id       String   @id @default(cuid())
+  reel     Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  reelId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String
+  createdAt DateTime @default(now())
+
+  @@unique([reelId, userId])
+}
+
+model ReelComment {
+  id        String   @id @default(cuid())
+  reel      Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  reelId    String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([reelId])
 }
