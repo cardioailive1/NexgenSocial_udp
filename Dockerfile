@@ -42,4 +42,4 @@ EXPOSE 4000
 # resulting prisma/migrations/ folder, then back to `migrate deploy` here)
 # is the standard next step for a production app -- db push is the right
 # tool for right now, not forever.
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node src/index.js"]
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node prisma/seedInterests.js && node src/index.js"]

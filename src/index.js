@@ -25,6 +25,8 @@ const circleRoutes = require("./routes/circles");
 const newsRoutes = require("./routes/news");
 const sportsRoutes = require("./routes/sports");
 const livestreamRoutes = require("./routes/livestreams");
+const profileRoutes = require("./routes/profile");
+const adsTargetingRoutes = require("./routes/adsTargeting");
 const { attachSignaling } = require("./livestreamSignaling");
 
 // Belt-and-suspenders: express-async-errors covers anything thrown inside
@@ -112,6 +114,8 @@ app.use("/api/circles", circleRoutes);
 app.use("/api/news", newsRoutes);
 app.use("/api/sports", sportsRoutes);
 app.use("/api/livestreams", livestreamRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/ads", adsTargetingRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);
