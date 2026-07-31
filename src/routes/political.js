@@ -36,7 +36,7 @@ router.get("/pages", optionalAuth, async (req, res) => {
     where: { ...(PAGE_TYPES.includes(type) && { type }) },
     orderBy: [{ verified: "desc" }, { createdAt: "desc" }],
     take: 100,
-    include: { owner: ownerSelect, _count: { select: { followers: true, posts: true, ads: true } } },
+    include: { owner: ownerSelect, media: true, _count: { select: { followers: true, posts: true, ads: true } } },
   });
 
   let followedIds = new Set();
@@ -58,6 +58,8 @@ router.get("/pages", optionalAuth, async (req, res) => {
       websiteUrl: p.websiteUrl,
       region: p.region,
       avatarUrl: p.avatarUrl,
+      coverUrl: p.coverUrl,
+      media: p.media,
       verified: p.verified,
       createdAt: p.createdAt,
       owner: p.owner,
@@ -69,7 +71,11 @@ router.get("/pages", optionalAuth, async (req, res) => {
   });
 });
 
-router.post("/pages", requireAuth, upload.fields([{ name: "avatar", maxCount: 1 }, { name: "cover", maxCount: 1 }]), async (req, res) => {
+router.post("/pages", requireAuth, upload.fields([
+  { name: "avatar", maxCount: 1 },
+  { name: "cover", maxCount: 1 },
+  { name: "media", maxCount: 10 },
+]), async (req, res) => {
   const { type, name, description, organization, websiteUrl, region } = req.body || {};
   if (!PAGE_TYPES.includes(type)) {
     return res.status(400).json({ error: "Choose a valid page type." });
@@ -92,8 +98,15 @@ router.post("/pages", requireAuth, upload.fields([{ name: "avatar", maxCount: 1 
       region: region || null,
       avatarUrl: req.files?.avatar?.[0] ? `/uploads/${req.files.avatar[0].filename}` : null,
       coverUrl: req.files?.cover?.[0] ? `/uploads/${req.files.cover[0].filename}` : null,
+      media: {
+        create: (req.files?.media || []).map((f, i) => ({
+          url: `/uploads/${f.filename}`,
+          kind: mediaKind(f),
+          position: i,
+        })),
+      },
     },
-    include: { owner: ownerSelect },
+    include: { owner: ownerSelect, media: true },
   });
   res.status(201).json({ page });
 });
@@ -104,6 +117,7 @@ router.get("/pages/:id", optionalAuth, async (req, res) => {
     include: {
       owner: ownerSelect,
       posts: { orderBy: { createdAt: "desc" }, take: 50, include: { media: true } },
+      media: true,
       _count: { select: { followers: true } },
     },
   });

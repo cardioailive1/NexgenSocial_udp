@@ -585,8 +585,25 @@ model Newsroom {
   articles    NewsArticle[]
   followers   NewsroomFollower[]
   livestreams Livestream[]
+  media       NewsroomMedia[]
 
   @@index([beat])
+}
+
+// Photos and video that belong to the newsroom itself rather than to a
+// single story -- studio shots, team photos, a channel trailer. Distinct
+// from ArticleMedia, which is tied to one published piece.
+model NewsroomMedia {
+  id         String    @id @default(cuid())
+  newsroom   Newsroom  @relation(fields: [newsroomId], references: [id], onDelete: Cascade)
+  newsroomId String
+  url        String
+  kind       MediaKind
+  caption    String?
+  position   Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  @@index([newsroomId])
 }
 
 model NewsroomFollower {
@@ -791,8 +808,22 @@ model PoliticalPage {
   followers   PoliticalPageFollower[]
   posts       PoliticalPost[]
   ads         PoliticalAd[]
+  media       PoliticalPageMedia[]
 
   @@index([type])
+}
+
+model PoliticalPageMedia {
+  id        String        @id @default(cuid())
+  page      PoliticalPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  pageId    String
+  url       String
+  kind      MediaKind
+  caption   String?
+  position  Int           @default(0)
+  createdAt DateTime      @default(now())
+
+  @@index([pageId])
 }
 
 model PoliticalPageFollower {

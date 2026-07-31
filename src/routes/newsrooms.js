@@ -41,6 +41,7 @@ router.get("/", optionalAuth, async (req, res) => {
     take: 100,
     include: {
       owner: ownerSelect,
+      media: true,
       _count: { select: { articles: true, followers: true } },
     },
   });
@@ -71,6 +72,8 @@ router.get("/", optionalAuth, async (req, res) => {
       organization: n.organization,
       websiteUrl: n.websiteUrl,
       avatarUrl: n.avatarUrl,
+      coverUrl: n.coverUrl,
+      media: n.media,
       beat: n.beat,
       region: n.region,
       verified: n.verified,
@@ -84,7 +87,11 @@ router.get("/", optionalAuth, async (req, res) => {
   });
 });
 
-router.post("/", requireAuth, upload.fields([{ name: "avatar", maxCount: 1 }, { name: "cover", maxCount: 1 }]), async (req, res) => {
+router.post("/", requireAuth, upload.fields([
+  { name: "avatar", maxCount: 1 },
+  { name: "cover", maxCount: 1 },
+  { name: "media", maxCount: 10 },
+]), async (req, res) => {
   const { name, description, organization, websiteUrl, beat, region } = req.body || {};
   if (!name || !organization) {
     // Same reasoning as political pages: a newsroom with no named
@@ -111,8 +118,15 @@ router.post("/", requireAuth, upload.fields([{ name: "avatar", maxCount: 1 }, { 
       region: region || null,
       avatarUrl: req.files?.avatar?.[0] ? `/uploads/${req.files.avatar[0].filename}` : null,
       coverUrl: req.files?.cover?.[0] ? `/uploads/${req.files.cover[0].filename}` : null,
+      media: {
+        create: (req.files?.media || []).map((f, i) => ({
+          url: `/uploads/${f.filename}`,
+          kind: mediaKind(f),
+          position: i,
+        })),
+      },
     },
-    include: { owner: ownerSelect },
+    include: { owner: ownerSelect, media: true },
   });
   res.status(201).json({ newsroom });
 });
@@ -123,6 +137,7 @@ router.get("/:slug", optionalAuth, async (req, res) => {
     include: {
       owner: ownerSelect,
       articles: { orderBy: [{ isBreaking: "desc" }, { publishedAt: "desc" }], take: 50, include: { media: true } },
+      media: true,
       _count: { select: { followers: true } },
     },
   });
@@ -165,6 +180,32 @@ router.delete("/:id/follow", requireAuth, async (req, res) => {
     where: { newsroomId: req.params.id, userId: req.userId },
   });
   res.status(204).end();
+});
+
+router.post("/:id/media", requireAuth, upload.array("media", 10), async (req, res) => {
+  const newsroom = await prisma.newsroom.findUnique({
+    where: { id: req.params.id },
+    include: { media: true },
+  });
+  if (!newsroom || newsroom.ownerId !== req.userId) return res.status(404).json({ error: "Newsroom not found." });
+
+  const files = req.files || [];
+  if (files.length === 0) return res.status(400).json({ error: "No files received." });
+
+  await prisma.newsroomMedia.createMany({
+    data: files.map((f, i) => ({
+      newsroomId: newsroom.id,
+      url: `/uploads/${f.filename}`,
+      kind: mediaKind(f),
+      position: newsroom.media.length + i,
+    })),
+  });
+
+  const updated = await prisma.newsroom.findUnique({
+    where: { id: newsroom.id },
+    include: { media: true },
+  });
+  res.status(201).json({ media: updated.media });
 });
 
 // --- Articles ------------------------------------------------------------
