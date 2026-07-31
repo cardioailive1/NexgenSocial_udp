@@ -46,6 +46,71 @@ router.get("/search", requireAuth, async (req, res) => {
   res.json({ users: users.map(publicUser) });
 });
 
+// Browse everyone on the platform. This didn't exist before -- there was
+// only /search, which requires knowing a name to type, so a newly created
+// account was effectively invisible to everyone. Returns relationship
+// context per user so the UI can show the right action button without an
+// extra request per row.
+router.get("/", requireAuth, async (req, res) => {
+  const q = (req.query.q || "").toString().trim();
+
+  const users = await prisma.user.findMany({
+    where: {
+      id: { not: req.userId },
+      ...(q && {
+        OR: [
+          { username: { contains: q, mode: "insensitive" } },
+          { displayName: { contains: q, mode: "insensitive" } },
+        ],
+      }),
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  const ids = users.map((u) => u.id);
+  const [following, friendRows] = await Promise.all([
+    prisma.follow.findMany({
+      where: { followerId: req.userId, followingId: { in: ids } },
+      select: { followingId: true },
+    }),
+    prisma.friendRequest.findMany({
+      where: {
+        OR: [
+          { senderId: req.userId, receiverId: { in: ids } },
+          { receiverId: req.userId, senderId: { in: ids } },
+        ],
+      },
+    }),
+  ]);
+
+  const followingSet = new Set(following.map((f) => f.followingId));
+  const friendStatusById = new Map();
+  for (const fr of friendRows) {
+    const otherId = fr.senderId === req.userId ? fr.receiverId : fr.senderId;
+    friendStatusById.set(otherId, {
+      status: fr.status,
+      // Needed so the UI knows whether to show "Accept" or "Request sent"
+      incoming: fr.receiverId === req.userId,
+      requestId: fr.id,
+    });
+  }
+
+  res.json({
+    users: users.map((u) => {
+      const { passwordHash, ...safe } = u;
+      const fr = friendStatusById.get(u.id);
+      return {
+        ...safe,
+        isFollowing: followingSet.has(u.id),
+        friendStatus: fr?.status || "NONE",
+        friendRequestIncoming: fr?.incoming || false,
+        friendRequestId: fr?.requestId || null,
+      };
+    }),
+  });
+});
+
 router.get("/:username", optionalAuth, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { username: req.params.username } });
   if (!user) return res.status(404).json({ error: "That profile doesn't exist." });

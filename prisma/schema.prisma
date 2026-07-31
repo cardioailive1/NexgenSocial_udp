@@ -98,6 +98,9 @@ model User {
   reelViews        ReelView[]
   reelLikes        ReelLike[]
   reelComments     ReelComment[]
+
+  politicalPages     PoliticalPage[] @relation("PoliticalPageOwner")
+  politicalFollowing PoliticalPageFollower[]
 }
 
 enum RelationshipStatus {
@@ -375,8 +378,42 @@ model MarketListing {
   title       String
   description String
   priceCents  Int
+  // Kept for backward compatibility with listings created before media
+  // uploads existed. New listings use the `media` relation below, which
+  // supports multiple photos AND video -- most real listings (cars,
+  // property, furniture) need several angles, not one image URL.
   imageUrl    String?
+  condition   String?
+  location    String?
+  status      ListingStatus @default(ACTIVE)
   createdAt   DateTime @default(now())
+
+  media       ListingMedia[]
+}
+
+enum ListingStatus {
+  ACTIVE
+  SOLD
+  WITHDRAWN
+}
+
+enum MediaKind {
+  PHOTO
+  VIDEO
+}
+
+model ListingMedia {
+  id         String        @id @default(cuid())
+  listing    MarketListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  listingId  String
+  url        String
+  kind       MediaKind
+  // Explicit ordering so the seller controls which photo is the cover
+  // image, rather than it depending on upload timing.
+  position   Int           @default(0)
+  createdAt  DateTime      @default(now())
+
+  @@index([listingId])
 }
 
 // --- Linked social accounts & invites ---
@@ -596,4 +633,106 @@ model ReelComment {
   createdAt DateTime @default(now())
 
   @@index([reelId])
+}
+
+// --- Political Place ------------------------------------------------------
+//
+// Political content is treated as a distinct category rather than folded
+// into general posts/ads, because the legal obligations genuinely differ.
+// In the US the FEC requires "paid for by" disclaimers on political
+// advertising; the EU's DSA and Political Advertising Regulation require
+// disclosure plus a public, searchable archive. Meta and Google both run
+// public political ad libraries for exactly this reason. The schema below
+// makes those requirements structural rather than optional.
+
+enum PoliticalPageType {
+  CANDIDATE
+  PARTY
+  ISSUE
+  CAMPAIGN
+  ORGANIZATION
+}
+
+model PoliticalPage {
+  id          String            @id @default(cuid())
+  owner       User              @relation("PoliticalPageOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId     String
+  type        PoliticalPageType
+  name        String
+  description String?
+  // Who is actually behind this page. Required, and shown publicly --
+  // anonymous political pages are the core thing disclosure rules exist to
+  // prevent.
+  organization String
+  websiteUrl  String?
+  // Jurisdiction/region the page is active in, so ad rules and archives
+  // can be filtered per country or state.
+  region      String?
+  avatarUrl   String?
+  coverUrl    String?
+  // Set by a platform admin after verifying the organization is real. The
+  // UI displays unverified pages differently rather than hiding the
+  // distinction.
+  verified    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+
+  followers   PoliticalPageFollower[]
+  posts       PoliticalPost[]
+  ads         PoliticalAd[]
+
+  @@index([type])
+}
+
+model PoliticalPageFollower {
+  id        String        @id @default(cuid())
+  page      PoliticalPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  pageId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime      @default(now())
+
+  @@unique([pageId, userId])
+}
+
+model PoliticalPost {
+  id        String        @id @default(cuid())
+  page      PoliticalPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  pageId    String
+  body      String
+  mediaUrl  String?
+  createdAt DateTime      @default(now())
+
+  @@index([pageId])
+}
+
+// Political ads are a separate model from the commercial Ad, not a
+// category flag on it. They carry mandatory disclosure fields, and every
+// one of them lands in a permanently public archive (see
+// routes/political.js) -- including after the campaign ends, which is
+// specifically what transparency regulations require.
+model PoliticalAd {
+  id            String        @id @default(cuid())
+  page          PoliticalPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  pageId        String
+  headline      String
+  body          String
+  imageUrl      String?
+  targetUrl     String?
+
+  // --- Mandatory disclosure ---
+  // The legally required "Paid for by ___" line.
+  paidForBy     String
+  // Declared spend and reach, which archives are expected to surface.
+  spendCents    Int           @default(0)
+  region        String?
+
+  active        Boolean       @default(true)
+  startedAt     DateTime      @default(now())
+  endedAt       DateTime?
+
+  impressions   Int           @default(0)
+  clicks        Int           @default(0)
+
+  @@index([pageId])
+  @@index([active])
 }

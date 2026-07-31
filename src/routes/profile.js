@@ -202,4 +202,61 @@ router.get("/:username/places", optionalAuth, async (req, res) => {
   res.json({ places });
 });
 
+// --- Place search (geocoding) -------------------------------------------
+//
+// Exists because "use my current location" fails whenever the browser has
+// blocked geolocation -- and a blocked permission is sticky, so telling
+// people to just allow it isn't a fix. Searching by name gives a path that
+// always works.
+//
+// Proxied server-side rather than called from the browser for two reasons:
+// Nominatim's usage policy requires an identifying User-Agent (which a
+// browser won't let us set on a cross-origin fetch), and it keeps their
+// rate limit under our control rather than per-user.
+//
+// NOTE for production: Nominatim is a free community service with a strict
+// 1 request/second limit and no uptime guarantee. Fine for this scale; if
+// place search becomes heavily used, switch to a paid geocoder (Google
+// Places, Mapbox, LocationIQ) -- only the fetch URL below changes.
+const geocodeCache = new Map();
+const GEOCODE_CACHE_MS = 24 * 60 * 60 * 1000;
+let lastGeocodeAt = 0;
+
+router.get("/geocode", requireAuth, async (req, res) => {
+  const q = (req.query.q || "").toString().trim();
+  if (q.length < 3) return res.status(400).json({ error: "Type at least 3 characters to search." });
+
+  const key = q.toLowerCase();
+  const cached = geocodeCache.get(key);
+  if (cached && Date.now() - cached.at < GEOCODE_CACHE_MS) {
+    return res.json({ results: cached.results, cached: true });
+  }
+
+  // Respect the 1 req/sec policy rather than hammering a free service.
+  const sinceLast = Date.now() - lastGeocodeAt;
+  if (sinceLast < 1100) await new Promise((r) => setTimeout(r, 1100 - sinceLast));
+  lastGeocodeAt = Date.now();
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=6&q=${encodeURIComponent(q)}`;
+    const response = await fetch(url, {
+      headers: { "User-Agent": "NexgenSocial/1.0 (place search for user-saved places)" },
+    });
+    if (!response.ok) throw new Error(`Geocoder returned ${response.status}`);
+
+    const raw = await response.json();
+    const results = raw.map((r) => ({
+      name: (r.display_name || "").split(",")[0],
+      address: r.display_name,
+      latitude: Number(r.lat),
+      longitude: Number(r.lon),
+    }));
+
+    geocodeCache.set(key, { results, at: Date.now() });
+    res.json({ results, cached: false });
+  } catch (err) {
+    res.status(502).json({ error: "Place search is unavailable right now. You can still enter coordinates manually." });
+  }
+});
+
 module.exports = router;

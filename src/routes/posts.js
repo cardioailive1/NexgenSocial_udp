@@ -182,18 +182,22 @@ router.get("/feed", requireAuth, async (req, res) => {
   const followingIds = new Set(following.map((f) => f.followingId));
   const friendIds = new Set(friendRows.map((r) => (r.senderId === req.userId ? r.receiverId : r.senderId)));
   const circleIds = myCircleMemberships.map((m) => m.circleId);
-  const visibleAuthorIds = [req.userId, ...followingIds, ...friendIds];
 
+  // The old version wrapped everything in `authorId: { in: visibleAuthorIds }`,
+  // which meant a PUBLIC post from someone you don't follow could never
+  // appear -- so a new user's posts were invisible to everyone, and a new
+  // user saw an empty feed. That defeats the point of marking a post public.
+  // Now each audience level is self-contained: PUBLIC really means public,
+  // and the restricted levels still check the relationship.
   const candidates = await prisma.post.findMany({
     where: {
       groupId: null,
-      authorId: { in: visibleAuthorIds },
       OR: [
         { audience: "PUBLIC" },
         { audience: "FOLLOWERS", authorId: { in: [...followingIds] } },
         { audience: "FRIENDS", authorId: { in: [...friendIds] } },
         { audience: "CIRCLE", circleId: { in: circleIds } },
-        { authorId: req.userId },
+        { authorId: req.userId }, // always see your own, whatever the audience
       ],
     },
     orderBy: { createdAt: "desc" },
