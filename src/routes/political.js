@@ -12,7 +12,18 @@ const storage = multer.diskStorage({
     cb(null, `political-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname) || ""}`);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
+const upload = multer({
+  storage,
+  limits: { fileSize: 200 * 1024 * 1024, files: 10 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) return cb(null, true);
+    cb(new Error("Only photos and videos can be attached."));
+  },
+});
+
+function mediaKind(file) {
+  return file.mimetype.startsWith("video") ? "VIDEO" : "PHOTO";
+}
 
 const PAGE_TYPES = ["CANDIDATE", "PARTY", "ISSUE", "CAMPAIGN", "ORGANIZATION"];
 const ownerSelect = { select: { id: true, username: true, displayName: true, avatarUrl: true } };
@@ -58,7 +69,7 @@ router.get("/pages", optionalAuth, async (req, res) => {
   });
 });
 
-router.post("/pages", requireAuth, upload.single("avatar"), async (req, res) => {
+router.post("/pages", requireAuth, upload.fields([{ name: "avatar", maxCount: 1 }, { name: "cover", maxCount: 1 }]), async (req, res) => {
   const { type, name, description, organization, websiteUrl, region } = req.body || {};
   if (!PAGE_TYPES.includes(type)) {
     return res.status(400).json({ error: "Choose a valid page type." });
@@ -79,7 +90,8 @@ router.post("/pages", requireAuth, upload.single("avatar"), async (req, res) => 
       organization,
       websiteUrl: websiteUrl || null,
       region: region || null,
-      avatarUrl: req.file ? `/uploads/${req.file.filename}` : null,
+      avatarUrl: req.files?.avatar?.[0] ? `/uploads/${req.files.avatar[0].filename}` : null,
+      coverUrl: req.files?.cover?.[0] ? `/uploads/${req.files.cover[0].filename}` : null,
     },
     include: { owner: ownerSelect },
   });
@@ -91,7 +103,7 @@ router.get("/pages/:id", optionalAuth, async (req, res) => {
     where: { id: req.params.id },
     include: {
       owner: ownerSelect,
-      posts: { orderBy: { createdAt: "desc" }, take: 50 },
+      posts: { orderBy: { createdAt: "desc" }, take: 50, include: { media: true } },
       _count: { select: { followers: true } },
     },
   });
@@ -123,26 +135,44 @@ router.delete("/pages/:id/follow", requireAuth, async (req, res) => {
   res.status(204).end();
 });
 
-router.post("/pages/:id/posts", requireAuth, upload.single("media"), async (req, res) => {
+router.post("/pages/:id/posts", requireAuth, upload.array("media", 10), async (req, res) => {
   const page = await prisma.politicalPage.findUnique({ where: { id: req.params.id } });
   if (!page || page.ownerId !== req.userId) return res.status(404).json({ error: "Page not found." });
 
   const { body } = req.body || {};
   if (!body || !body.trim()) return res.status(400).json({ error: "Write something to post." });
 
+  const files = req.files || [];
   const post = await prisma.politicalPost.create({
     data: {
       pageId: page.id,
       body,
-      mediaUrl: req.file ? `/uploads/${req.file.filename}` : null,
+      media: {
+        create: files.map((f, i) => ({
+          url: `/uploads/${f.filename}`,
+          kind: mediaKind(f),
+          position: i,
+        })),
+      },
     },
+    include: { media: true },
   });
   res.status(201).json({ post });
 });
 
+router.get("/pages/:id/posts", optionalAuth, async (req, res) => {
+  const posts = await prisma.politicalPost.findMany({
+    where: { pageId: req.params.id },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { media: true },
+  });
+  res.json({ posts });
+});
+
 // --- Political ads -------------------------------------------------------
 
-router.post("/ads", requireAuth, upload.single("image"), async (req, res) => {
+router.post("/ads", requireAuth, upload.single("media"), async (req, res) => {
   const { pageId, headline, body, targetUrl, paidForBy, spendCents, region } = req.body || {};
 
   const page = await prisma.politicalPage.findUnique({ where: { id: pageId } });
@@ -166,7 +196,8 @@ router.post("/ads", requireAuth, upload.single("image"), async (req, res) => {
       headline,
       body,
       targetUrl: targetUrl || null,
-      imageUrl: req.file ? `/uploads/${req.file.filename}` : null,
+      mediaUrl: req.file ? `/uploads/${req.file.filename}` : null,
+      mediaKind: req.file ? mediaKind(req.file) : null,
       paidForBy,
       spendCents: spendCents ? Math.round(Number(spendCents)) : 0,
       region: region || page.region || null,
@@ -235,6 +266,8 @@ router.get("/archive", async (req, res) => {
       headline: ad.headline,
       body: ad.body,
       imageUrl: ad.imageUrl,
+      mediaUrl: ad.mediaUrl,
+      mediaKind: ad.mediaKind,
       targetUrl: ad.targetUrl,
       paidForBy: ad.paidForBy,
       spendCents: ad.spendCents,

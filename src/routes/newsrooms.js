@@ -12,7 +12,18 @@ const storage = multer.diskStorage({
     cb(null, `news-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname) || ""}`);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
+const upload = multer({
+  storage,
+  limits: { fileSize: 200 * 1024 * 1024, files: 10 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) return cb(null, true);
+    cb(new Error("Only photos and videos can be attached."));
+  },
+});
+
+function mediaKind(file) {
+  return file.mimetype.startsWith("video") ? "VIDEO" : "PHOTO";
+}
 
 const ownerSelect = { select: { id: true, username: true, displayName: true, avatarUrl: true } };
 
@@ -73,7 +84,7 @@ router.get("/", optionalAuth, async (req, res) => {
   });
 });
 
-router.post("/", requireAuth, upload.single("avatar"), async (req, res) => {
+router.post("/", requireAuth, upload.fields([{ name: "avatar", maxCount: 1 }, { name: "cover", maxCount: 1 }]), async (req, res) => {
   const { name, description, organization, websiteUrl, beat, region } = req.body || {};
   if (!name || !organization) {
     // Same reasoning as political pages: a newsroom with no named
@@ -98,7 +109,8 @@ router.post("/", requireAuth, upload.single("avatar"), async (req, res) => {
       websiteUrl: websiteUrl || null,
       beat: beat || null,
       region: region || null,
-      avatarUrl: req.file ? `/uploads/${req.file.filename}` : null,
+      avatarUrl: req.files?.avatar?.[0] ? `/uploads/${req.files.avatar[0].filename}` : null,
+      coverUrl: req.files?.cover?.[0] ? `/uploads/${req.files.cover[0].filename}` : null,
     },
     include: { owner: ownerSelect },
   });
@@ -110,7 +122,7 @@ router.get("/:slug", optionalAuth, async (req, res) => {
     where: { slug: req.params.slug },
     include: {
       owner: ownerSelect,
-      articles: { orderBy: [{ isBreaking: "desc" }, { publishedAt: "desc" }], take: 50 },
+      articles: { orderBy: [{ isBreaking: "desc" }, { publishedAt: "desc" }], take: 50, include: { media: true } },
       _count: { select: { followers: true } },
     },
   });
@@ -157,15 +169,21 @@ router.delete("/:id/follow", requireAuth, async (req, res) => {
 
 // --- Articles ------------------------------------------------------------
 
-router.post("/:id/articles", requireAuth, upload.single("image"), async (req, res) => {
+router.post("/:id/articles", requireAuth, upload.array("media", 10), async (req, res) => {
   const newsroom = await prisma.newsroom.findUnique({ where: { id: req.params.id } });
   if (!newsroom || newsroom.ownerId !== req.userId) {
     return res.status(404).json({ error: "Newsroom not found." });
   }
 
-  const { headline, standfirst, body, byline, isBreaking } = req.body || {};
+  const { headline, standfirst, body, byline, isBreaking, captions } = req.body || {};
   if (!headline || !body) return res.status(400).json({ error: "A headline and body are required." });
 
+  // Captions arrive as a JSON array matching file order, so a photo credit
+  // stays attached to the right image.
+  let captionList = [];
+  try { captionList = captions ? JSON.parse(captions) : []; } catch { captionList = []; }
+
+  const files = req.files || [];
   const article = await prisma.newsArticle.create({
     data: {
       newsroomId: newsroom.id,
@@ -174,8 +192,16 @@ router.post("/:id/articles", requireAuth, upload.single("image"), async (req, re
       body,
       byline: byline || null,
       isBreaking: isBreaking === "true" || isBreaking === true,
-      imageUrl: req.file ? `/uploads/${req.file.filename}` : null,
+      media: {
+        create: files.map((f, i) => ({
+          url: `/uploads/${f.filename}`,
+          kind: mediaKind(f),
+          caption: captionList[i] || null,
+          position: i,
+        })),
+      },
     },
+    include: { media: true },
   });
   res.status(201).json({ article });
 });
@@ -231,6 +257,7 @@ router.get("/feed/latest", optionalAuth, async (_req, res) => {
     take: 60,
     include: {
       newsroom: { select: { id: true, name: true, slug: true, organization: true, verified: true, avatarUrl: true } },
+      media: true,
     },
   });
   res.json({ articles });

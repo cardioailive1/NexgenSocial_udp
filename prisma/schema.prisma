@@ -608,6 +608,7 @@ model NewsArticle {
   // Short summary shown in feeds and cards.
   standfirst String?
   body       String
+  // Legacy single-image field, retained for existing articles.
   imageUrl   String?
   // Named byline, since the person publishing through the account is often
   // not the account owner (an editor posting a reporter's piece).
@@ -620,8 +621,25 @@ model NewsArticle {
   // visible rather than silent -- same principle as post edit history.
   correctedAt DateTime?
 
+  media      ArticleMedia[]
+
   @@index([newsroomId])
   @@index([publishedAt])
+}
+
+model ArticleMedia {
+  id        String      @id @default(cuid())
+  article   NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  articleId String
+  url       String
+  kind      MediaKind
+  // Optional caption/credit -- standard practice in news photography, and
+  // often a licensing requirement for wire images.
+  caption   String?
+  position  Int         @default(0)
+  createdAt DateTime    @default(now())
+
+  @@index([articleId])
 }
 
 // --- Reels: short-form vertical video, optimized for discovery ---------
@@ -793,10 +811,26 @@ model PoliticalPost {
   page      PoliticalPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
   pageId    String
   body      String
+  // Legacy single-file field, kept so posts created before multi-upload
+  // existed still render. New posts use the `media` relation.
   mediaUrl  String?
   createdAt DateTime      @default(now())
 
+  media     PoliticalPostMedia[]
+
   @@index([pageId])
+}
+
+model PoliticalPostMedia {
+  id        String        @id @default(cuid())
+  post      PoliticalPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  url       String
+  kind      MediaKind
+  position  Int           @default(0)
+  createdAt DateTime      @default(now())
+
+  @@index([postId])
 }
 
 // Political ads are a separate model from the commercial Ad, not a
@@ -810,7 +844,12 @@ model PoliticalAd {
   pageId        String
   headline      String
   body          String
+  // imageUrl is retained for existing ads. mediaUrl/mediaKind supersede it
+  // and allow video creative, which is what most political advertising
+  // actually uses.
   imageUrl      String?
+  mediaUrl      String?
+  mediaKind     MediaKind?
   targetUrl     String?
 
   // --- Mandatory disclosure ---

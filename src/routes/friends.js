@@ -48,6 +48,21 @@ router.patch("/requests/:id", requireAuth, async (req, res) => {
   res.json({ request: updated });
 });
 
+// Cancel a pending request you sent. Declared before the "/:userId" route
+// below, because Express matches in order and "/:userId" would otherwise
+// capture "requests" as a user id and this would never be reached.
+router.delete("/requests/:id", requireAuth, async (req, res) => {
+  const request = await prisma.friendRequest.findUnique({ where: { id: req.params.id } });
+  if (!request || request.senderId !== req.userId) {
+    return res.status(404).json({ error: "No such request." });
+  }
+  if (request.status !== "PENDING") {
+    return res.status(409).json({ error: "That request has already been answered." });
+  }
+  await prisma.friendRequest.delete({ where: { id: request.id } });
+  res.status(204).end();
+});
+
 // Remove an existing friendship
 router.delete("/:userId", requireAuth, async (req, res) => {
   const otherId = req.params.userId;
@@ -65,22 +80,32 @@ router.delete("/:userId", requireAuth, async (req, res) => {
 
 // List: pending invitations you've received, and your accepted friends
 router.get("/", requireAuth, async (req, res) => {
-  const [incoming, accepted] = await Promise.all([
+  const userSelect = { select: { id: true, username: true, displayName: true, avatarUrl: true } };
+
+  // Previously this returned only INCOMING requests and accepted friends,
+  // which meant that after you sent a request it disappeared from your view
+  // entirely -- you'd see "Request sent" once and then have no way to check
+  // whether it was still pending, or to take it back. Outgoing requests are
+  // now returned as well.
+  const [incoming, sent, accepted] = await Promise.all([
     prisma.friendRequest.findMany({
       where: { receiverId: req.userId, status: "PENDING" },
-      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true } } },
+      orderBy: { createdAt: "desc" },
+      include: { sender: userSelect },
+    }),
+    prisma.friendRequest.findMany({
+      where: { senderId: req.userId, status: "PENDING" },
+      orderBy: { createdAt: "desc" },
+      include: { receiver: userSelect },
     }),
     prisma.friendRequest.findMany({
       where: { status: "ACCEPTED", OR: [{ senderId: req.userId }, { receiverId: req.userId }] },
-      include: {
-        sender: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
-        receiver: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
-      },
+      include: { sender: userSelect, receiver: userSelect },
     }),
   ]);
 
   const friends = accepted.map((r) => (r.senderId === req.userId ? r.receiver : r.sender));
-  res.json({ incomingRequests: incoming, friends });
+  res.json({ incomingRequests: incoming, sentRequests: sent, friends });
 });
 
 module.exports = router;
