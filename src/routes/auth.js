@@ -16,12 +16,21 @@ function publicUser(user) {
 }
 
 router.post("/register", async (req, res) => {
-  const { email, username, password, displayName, inviteToken } = req.body || {};
+  const { email, username, password, displayName, inviteToken,
+          acceptedTerms, policyVersion } = req.body || {};
   if (!email || !username || !password || !displayName) {
     return res.status(400).json({ error: "Email, username, password, and display name are all required." });
   }
   if (password.length < 8) {
     return res.status(400).json({ error: "Password must be at least 8 characters." });
+  }
+  // Enforced server-side, not just by a checkbox in the form -- otherwise
+  // the record of consent could be bypassed by posting straight to the API,
+  // which would undermine the entire point of having one.
+  if (acceptedTerms !== true) {
+    return res.status(400).json({
+      error: "You must accept the Terms of Use and Privacy Policy to create an account.",
+    });
   }
 
   const existing = await prisma.user.findFirst({
@@ -40,8 +49,16 @@ router.post("/register", async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
+  const acceptedAt = new Date();
   const user = await prisma.user.create({
-    data: { email, username, passwordHash, displayName },
+    data: {
+      email, username, passwordHash, displayName,
+      // Storing WHEN and WHICH VERSION was accepted is what makes this a
+      // usable record rather than just a boolean.
+      acceptedTermsAt: acceptedAt,
+      acceptedPrivacyAt: acceptedAt,
+      acceptedPolicyVersion: policyVersion || null,
+    },
   });
 
   if (invite && invite.status === "SENT" && invite.senderId !== user.id) {

@@ -30,6 +30,8 @@ const adsTargetingRoutes = require("./routes/adsTargeting");
 const reelRoutes = require("./routes/reels");
 const marketplaceRoutes = require("./routes/marketplace");
 const politicalRoutes = require("./routes/political");
+const newsroomRoutes = require("./routes/newsrooms");
+const jobRoutes = require("./routes/jobs");
 const { attachSignaling } = require("./livestreamSignaling");
 
 // Belt-and-suspenders: express-async-errors covers anything thrown inside
@@ -122,6 +124,8 @@ app.use("/api/ads", adsTargetingRoutes);
 app.use("/api/reels", reelRoutes);
 app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/political", politicalRoutes);
+app.use("/api/newsrooms", newsroomRoutes);
+app.use("/api/jobs", jobRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);
