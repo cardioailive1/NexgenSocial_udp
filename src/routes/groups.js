@@ -66,17 +66,68 @@ router.post("/:id/leave", requireAuth, async (req, res) => {
   res.status(204).end();
 });
 
-router.get("/:id/posts", async (req, res) => {
+router.get("/:id/posts", optionalAuth, async (req, res) => {
   const posts = await prisma.post.findMany({
     where: { groupId: req.params.id },
     orderBy: { createdAt: "desc" },
     include: {
       author: memberSelect,
       likes: { select: { userId: true } },
-      _count: { select: { likes: true, comments: true } },
+      media: true,
+      _count: { select: { likes: true, comments: true, contextNotes: true } },
     },
   });
-  res.json({ posts });
+
+  // Shaped to match what PostCard expects (likeCount, commentCount,
+  // likedByViewer, media). Previously this returned raw Prisma rows, so
+  // group posts rendered with missing counts and no attachments.
+  res.json({
+    posts: posts.map((p) => ({
+      id: p.id,
+      type: p.type,
+      body: p.body,
+      mediaUrl: p.mediaUrl,
+      media: p.media || [],
+      groupId: p.groupId,
+      audience: p.audience,
+      category: p.category,
+      isAiGenerated: p.isAiGenerated,
+      aiTool: p.aiTool,
+      editedAt: p.editedAt,
+      createdAt: p.createdAt,
+      author: p.author,
+      likeCount: p._count.likes,
+      commentCount: p._count.comments,
+      contextNoteCount: p._count.contextNotes,
+      likedByViewer: req.userId ? p.likes.some((l) => l.userId === req.userId) : false,
+    })),
+  });
+});
+
+// Members list. The detail endpoint already includes members, but a
+// dedicated route lets the UI page through a large group without
+// re-fetching every post alongside it.
+router.get("/:id/members", optionalAuth, async (req, res) => {
+  const group = await prisma.group.findUnique({ where: { id: req.params.id } });
+  if (!group) return res.status(404).json({ error: "Group not found." });
+
+  const members = await prisma.groupMember.findMany({
+    where: { groupId: group.id },
+    orderBy: [{ role: "asc" }, { joinedAt: "asc" }],
+    include: { user: memberSelect },
+  });
+
+  res.json({
+    members: members.map((m) => ({
+      id: m.user.id,
+      username: m.user.username,
+      displayName: m.user.displayName,
+      avatarUrl: m.user.avatarUrl,
+      role: m.role,
+      joinedAt: m.joinedAt,
+      isOwner: m.userId === group.ownerId,
+    })),
+  });
 });
 
 module.exports = router;

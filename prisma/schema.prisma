@@ -260,6 +260,23 @@ model Post {
   likes      Like[]
   revisions  PostRevision[]
   contextNotes ContextNote[]
+  media      PostMedia[]
+}
+
+// Posts originally supported exactly one attachment via the mediaUrl/type
+// fields above. Those are retained so existing posts still render, but new
+// posts attach through here, which allows several photos and videos in one
+// post -- the same pattern used by listings, articles and messages.
+model PostMedia {
+  id        String    @id @default(cuid())
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  url       String
+  kind      MediaKind
+  position  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([postId])
 }
 
 // A snapshot of a post's body taken every time it's edited, so edits are

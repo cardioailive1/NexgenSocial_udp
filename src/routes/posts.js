@@ -23,7 +23,13 @@ const storage = multer.diskStorage({
 // this leaves real headroom instead of the two limits fighting each
 // other, where a recording finishes fine but then fails at the very last
 // step (upload) with a confusing error.
-const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
+// upload.array, not upload.single: the composer can attach several photos
+// and videos. With upload.single, multer rejects the whole request with
+// "Unexpected field" the moment a second file arrives -- which is why
+// multi-file posts appeared to silently do nothing.
+const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024, files: 10 } });
+
+const mediaKindOf = (f) => (f.mimetype.startsWith("video") ? "VIDEO" : "PHOTO");
 
 const postAuthorSelect = { id: true, username: true, displayName: true, avatarUrl: true };
 
@@ -90,6 +96,7 @@ function serialize(entry, viewerId) {
     type: post.type,
     body: post.body,
     mediaUrl: post.mediaUrl,
+    media: post.media || [],
     groupId: post.groupId,
     audience: post.audience,
     circleId: post.circleId,
@@ -109,17 +116,20 @@ function serialize(entry, viewerId) {
 }
 
 // Create a text thread ("twit") or a media post
-router.post("/", requireAuth, upload.single("media"), async (req, res) => {
+router.post("/", requireAuth, upload.array("media", 10), async (req, res) => {
   const { body, groupId, audience, circleId, isAiGenerated, aiTool, category } = req.body || {};
-  if (!body && !req.file) {
+  const files = req.files || [];
+  if (!body && files.length === 0) {
     return res.status(400).json({ error: "Write something or attach media before posting." });
   }
 
+  // The legacy single-file fields are still populated from the first
+  // attachment so anything reading mediaUrl/type keeps working.
   let type = "TEXT";
   let mediaUrl = null;
-  if (req.file) {
-    mediaUrl = `/uploads/${req.file.filename}`;
-    type = req.file.mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
+  if (files.length > 0) {
+    mediaUrl = `/uploads/${files[0].filename}`;
+    type = files[0].mimetype.startsWith("video") ? "VIDEO" : "IMAGE";
   }
 
   const validAudiences = ["PUBLIC", "FRIENDS", "FOLLOWERS", "CIRCLE"];
@@ -139,8 +149,15 @@ router.post("/", requireAuth, upload.single("media"), async (req, res) => {
       isAiGenerated: isAiGenerated === "true" || isAiGenerated === true,
       aiTool: aiTool || null,
       category: resolvedCategory,
+      media: {
+        create: files.map((f, i) => ({
+          url: `/uploads/${f.filename}`,
+          kind: mediaKindOf(f),
+          position: i,
+        })),
+      },
     },
-    include: { author: { select: postAuthorSelect } },
+    include: { author: { select: postAuthorSelect }, media: true },
   });
   res.status(201).json({ post: serialize({ post, score: 0, breakdown: {}, reason: "Your post" }, req.userId) });
 });
@@ -162,6 +179,7 @@ router.get("/explore", optionalAuth, async (req, res) => {
     include: {
       author: { select: postAuthorSelect },
       likes: { select: { userId: true } },
+      media: true,
       _count: { select: { likes: true, comments: true, contextNotes: true } },
     },
   });
@@ -205,6 +223,7 @@ router.get("/feed", requireAuth, async (req, res) => {
     include: {
       author: { select: postAuthorSelect },
       likes: { select: { userId: true } },
+      media: true,
       _count: { select: { likes: true, comments: true, contextNotes: true } },
     },
   });
@@ -227,6 +246,7 @@ router.get("/by/:username", optionalAuth, async (req, res) => {
     include: {
       author: { select: postAuthorSelect },
       likes: { select: { userId: true } },
+      media: true,
       _count: { select: { likes: true, comments: true, contextNotes: true } },
     },
   });
