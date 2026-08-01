@@ -108,6 +108,11 @@ model User {
   jobPostings        JobPosting[]     @relation("JobPoster")
   jobApplications    JobApplication[] @relation("JobApplicant")
 
+  conversations      ConversationParticipant[]
+  messagesSent       Message[]
+  callsMade          Call[] @relation("CallCaller")
+  callsReceived      Call[] @relation("CallCallee")
+
   // Recorded at signup. Storing WHEN each document was accepted (and which
   // version) is the practical difference between "we have a policy" and
   // "we can show this user agreed to it" if it's ever questioned.
@@ -987,4 +992,100 @@ model JobApplication {
 
   @@unique([jobId, applicantId])
   @@index([applicantId])
+}
+
+// --- Direct messaging & calls ---------------------------------------------
+
+model Conversation {
+  id           String   @id @default(cuid())
+  // Direct (1:1) conversations are the only kind for now. Kept as a model
+  // rather than a flat message table so group chat can be added later
+  // without a migration that rewrites every message.
+  isGroup      Boolean  @default(false)
+  title        String?
+  createdAt    DateTime @default(now())
+  lastMessageAt DateTime @default(now())
+
+  participants ConversationParticipant[]
+  messages     Message[]
+  calls        Call[]
+
+  @@index([lastMessageAt])
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String
+  // Used to compute unread counts without scanning every message.
+  lastReadAt     DateTime?
+  joinedAt       DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderId       String
+  body           String?
+  createdAt      DateTime     @default(now())
+  // Edits are visible rather than silent, consistent with how posts and
+  // news articles behave elsewhere in the app.
+  editedAt       DateTime?
+
+  attachments    MessageAttachment[]
+
+  @@index([conversationId, createdAt])
+}
+
+model MessageAttachment {
+  id        String    @id @default(cuid())
+  message   Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String
+  url       String
+  kind      MediaKind
+  position  Int       @default(0)
+
+  @@index([messageId])
+}
+
+enum CallStatus {
+  RINGING
+  ACTIVE
+  ENDED
+  MISSED
+  DECLINED
+}
+
+enum CallKind {
+  AUDIO
+  VIDEO
+}
+
+// An in-app call between NexgenSocial users, carried over the existing
+// WebRTC/mediasoup infrastructure. This is NOT a telephone call: dialling
+// a real phone number requires a licensed carrier or a provider account
+// (Twilio, Vonage, Telnyx) and per-minute billing. See the README.
+model Call {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  caller         User         @relation("CallCaller", fields: [callerId], references: [id], onDelete: Cascade)
+  callerId       String
+  callee         User         @relation("CallCallee", fields: [calleeId], references: [id], onDelete: Cascade)
+  calleeId       String
+  kind           CallKind     @default(AUDIO)
+  status         CallStatus   @default(RINGING)
+  startedAt      DateTime     @default(now())
+  answeredAt     DateTime?
+  endedAt        DateTime?
+
+  @@index([calleeId, status])
+  @@index([conversationId])
 }
