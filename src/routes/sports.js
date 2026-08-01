@@ -22,14 +22,35 @@ const BASE_URL = `https://www.thesportsdb.com/api/v1/json/${API_KEY}`;
 // them would be straightforward copyright infringement. Linking out to the
 // rights holder is both legal and genuinely more useful, since it lands
 // people on whatever service actually carries the match in their country.
+// League ids are TheSportsDB's. The ones below are taken from their
+// published dataset rather than guessed -- an id that doesn't exist returns
+// an empty list, which looks identical to "between seasons" and is
+// frustrating to debug. `verified: false` marks entries inferred rather
+// than confirmed, and the UI says so instead of showing a silent blank.
+//
+// To add more: look the league up on thesportsdb.com/sport/leagues, copy
+// its id, and add a row here.
 const LEAGUES = {
-  soccer: { id: "4328", label: "English Premier League", broadcastUrl: "https://www.premierleague.com/broadcast-schedules" },
-  nba: { id: "4387", label: "NBA", broadcastUrl: "https://www.nba.com/schedule" },
-  nfl: { id: "4391", label: "NFL", broadcastUrl: "https://www.nfl.com/schedules/" },
-  mlb: { id: "4424", label: "MLB", broadcastUrl: "https://www.mlb.com/schedule" },
-  volleyball_vnl_men: { id: "5083", label: "FIVB Volleyball Men's Nations League", broadcastUrl: "https://en.volleyballworld.com/volleyball/competitions/vnl-2026/" },
-  volleyball_vnl_women: { id: "5084", label: "FIVB Volleyball Women's Nations League", broadcastUrl: "https://en.volleyballworld.com/volleyball/competitions/vnl-2026/" },
-  volleyball_superlega: { id: "5122", label: "Italy SuperLega (Volleyball)", broadcastUrl: "https://www.legavolley.it/" },
+  // --- Soccer / Football ---
+  epl:        { id: "4328", label: "English Premier League", sport: "Soccer", verified: true,  broadcastUrl: "https://www.premierleague.com/broadcast-schedules" },
+  laliga:     { id: "4335", label: "Spanish La Liga",        sport: "Soccer", verified: true,  broadcastUrl: "https://www.laliga.com/en-GB" },
+  seriea:     { id: "4332", label: "Italian Serie A",        sport: "Soccer", verified: true,  broadcastUrl: "https://www.legaseriea.it/en" },
+  bundesliga: { id: "4331", label: "German Bundesliga",      sport: "Soccer", verified: true,  broadcastUrl: "https://www.bundesliga.com/en/bundesliga" },
+  ligue1:     { id: "4334", label: "French Ligue 1",         sport: "Soccer", verified: true,  broadcastUrl: "https://www.ligue1.com/" },
+  eredivisie: { id: "4337", label: "Dutch Eredivisie",       sport: "Soccer", verified: true,  broadcastUrl: "https://eredivisie.nl/" },
+  greece:     { id: "4336", label: "Greek Super League",     sport: "Soccer", verified: true,  broadcastUrl: "https://www.slgr.gr/en/" },
+  mls:        { id: "4346", label: "Major League Soccer",    sport: "Soccer", verified: true,  broadcastUrl: "https://www.mlssoccer.com/schedule/scores" },
+
+  // --- American sports ---
+  nfl:  { id: "4391", label: "NFL",  sport: "American Football", verified: true, broadcastUrl: "https://www.nfl.com/schedules/" },
+  nba:  { id: "4387", label: "NBA",  sport: "Basketball",        verified: true, broadcastUrl: "https://www.nba.com/schedule" },
+  mlb:  { id: "4424", label: "MLB",  sport: "Baseball",          verified: true, broadcastUrl: "https://www.mlb.com/schedule" },
+  nhl:  { id: "4380", label: "NHL",  sport: "Ice Hockey",        verified: true, broadcastUrl: "https://www.nhl.com/schedule" },
+
+  // --- Volleyball ---
+  vnl_men:   { id: "5083", label: "FIVB Men's Nations League",   sport: "Volleyball", verified: true,  broadcastUrl: "https://en.volleyballworld.com/" },
+  vnl_women: { id: "5084", label: "FIVB Women's Nations League", sport: "Volleyball", verified: false, broadcastUrl: "https://en.volleyballworld.com/" },
+  superlega: { id: "5122", label: "Italy SuperLega",             sport: "Volleyball", verified: false, broadcastUrl: "https://www.legavolley.it/" },
 };
 
 let cache = {}; // keyed by league key, { data, fetchedAt }
@@ -91,6 +112,8 @@ async function fetchLeagueEvents(leagueKey) {
     // that looks broken.
     noData: upcoming.length === 0 && recent.length === 0,
     leagueId: league.id,
+    sport: league.sport,
+    verified: league.verified !== false,
   };
   cache[leagueKey] = { data, fetchedAt: Date.now() };
   return data;
@@ -99,7 +122,8 @@ async function fetchLeagueEvents(leagueKey) {
 router.get("/leagues", (_req, res) => {
   res.json({
     leagues: Object.entries(LEAGUES).map(([key, v]) => ({
-      key, label: v.label, broadcastUrl: v.broadcastUrl || null,
+      key, label: v.label, sport: v.sport, verified: v.verified !== false,
+      broadcastUrl: v.broadcastUrl || null,
     })),
   });
 });
