@@ -24,6 +24,16 @@ router.post("/register", async (req, res) => {
   if (password.length < 8) {
     return res.status(400).json({ error: "Password must be at least 8 characters." });
   }
+
+  // Usernames appear directly in URLs (/u/:username, /api/follows/:username)
+  // and in WebSocket room ids. Without this, a username containing a space
+  // or slash produced URLs that silently failed -- which is exactly how an
+  // account named "Maxwell Mwinzumah" broke calling entirely.
+  if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(username)) {
+    return res.status(400).json({
+      error: "Username must be 3-30 characters and can only contain letters, numbers, and _ . -  (no spaces).",
+    });
+  }
   // Enforced server-side, not just by a checkbox in the form -- otherwise
   // the record of consent could be bypassed by posting straight to the API,
   // which would undermine the entire point of having one.
