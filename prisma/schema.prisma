@@ -113,6 +113,11 @@ model User {
   callsMade          Call[] @relation("CallCaller")
   callsReceived      Call[] @relation("CallCallee")
 
+  meetingsHosted     Meeting[] @relation("MeetingHost")
+  meetingSeats       MeetingParticipant[]
+  meetingInvites     MeetingInvite[]
+  meetingChat        MeetingChatMessage[]
+
   // Recorded at signup. Storing WHEN each document was accepted (and which
   // version) is the practical difference between "we have a policy" and
   // "we can show this user agreed to it" if it's ever questioned.
@@ -322,6 +327,7 @@ model Group {
 
   members     GroupMember[]
   posts       Post[]
+  meetingInvites MeetingInvite[]
 }
 
 model GroupMember {
@@ -1105,4 +1111,122 @@ model Call {
 
   @@index([calleeId, status])
   @@index([conversationId])
+}
+
+// --- NexgenMeet: multi-party meetings -------------------------------------
+
+enum MeetingStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+}
+
+enum MeetingRole {
+  HOST
+  COHOST
+  PARTICIPANT
+}
+
+enum RecordingVisibility {
+  PRIVATE
+  PUBLIC
+}
+
+model Meeting {
+  id          String        @id @default(cuid())
+  host        User          @relation("MeetingHost", fields: [hostId], references: [id], onDelete: Cascade)
+  hostId      String
+  title       String
+  description String?
+  // Short human-shareable code, so a meeting can be joined by typing rather
+  // than only by following a link.
+  code        String        @unique
+  status      MeetingStatus @default(SCHEDULED)
+  scheduledFor DateTime?
+  startedAt   DateTime?
+  endedAt     DateTime?
+
+  // --- Host controls ---
+  // Participants wait for admission instead of entering directly. Defaults
+  // on: an open room that anyone with the code can walk into is a real
+  // problem once a link leaks.
+  waitingRoomEnabled Boolean @default(true)
+  muteOnEntry        Boolean @default(true)
+  allowParticipantScreenShare Boolean @default(true)
+  allowChat          Boolean @default(true)
+  locked             Boolean @default(false)
+
+  createdAt   DateTime      @default(now())
+
+  participants MeetingParticipant[]
+  invites      MeetingInvite[]
+  recordings   MeetingRecording[]
+  chat         MeetingChatMessage[]
+
+  @@index([code])
+  @@index([hostId])
+}
+
+model MeetingParticipant {
+  id        String      @id @default(cuid())
+  meeting   Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meetingId String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  role      MeetingRole @default(PARTICIPANT)
+  // Set when the host admits them from the waiting room.
+  admitted  Boolean     @default(false)
+  mutedByHost Boolean   @default(false)
+  removed   Boolean     @default(false)
+  joinedAt  DateTime?
+  leftAt    DateTime?
+  createdAt DateTime    @default(now())
+
+  @@unique([meetingId, userId])
+  @@index([meetingId])
+}
+
+model MeetingInvite {
+  id        String   @id @default(cuid())
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meetingId String
+  // Either a specific user, or a whole group.
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+  group     Group?   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId   String?
+  createdAt DateTime @default(now())
+
+  @@index([meetingId])
+  @@index([userId])
+}
+
+model MeetingChatMessage {
+  id        String   @id @default(cuid())
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meetingId String
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([meetingId, createdAt])
+}
+
+model MeetingRecording {
+  id         String              @id @default(cuid())
+  meeting    Meeting             @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  meetingId  String
+  url        String
+  durationSec Float?
+  sizeBytes  Int?
+  // A recording is private until the host explicitly publishes it. Meeting
+  // recordings can contain anything, so defaulting to public would be a
+  // serious mistake.
+  visibility RecordingVisibility @default(PRIVATE)
+  // Set if the host publishes it as a post, so the two stay linked.
+  postId     String?
+  createdAt  DateTime            @default(now())
+
+  @@index([meetingId])
 }

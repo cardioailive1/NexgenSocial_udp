@@ -67,10 +67,37 @@ async function attachSignaling(httpServer) {
           role = data.role === "host" ? "host" : "viewer";
           peerId = `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-          if (role === "host") {
+          // Rooms come in three flavours, distinguished by an id prefix.
+          // Previously EVERY "host" join was looked up in the livestream
+          // table -- so a call joining as `call-<id>` found no livestream,
+          // was rejected outright, and neither party ever connected. That
+          // was the cause of calls ringing forever without arriving.
+          let userId = null;
+          try { userId = jwt.verify(data.token, process.env.JWT_SECRET).sub; } catch {}
+
+          if (roomId.startsWith("call-")) {
+            // 1:1 call. Both sides publish, so both join as "host"; the
+            // check is simply that you're one of the two participants.
+            const callId = roomId.slice("call-".length);
+            const call = await prisma.call.findUnique({ where: { id: callId } });
+            if (!call) return replyError(ws, reqId, "That call no longer exists.");
+            if (!userId || (call.callerId !== userId && call.calleeId !== userId)) {
+              return replyError(ws, reqId, "You're not a participant in this call.");
+            }
+            if (["ENDED", "DECLINED", "MISSED"].includes(call.status)) {
+              return replyError(ws, reqId, "That call has already ended.");
+            }
+          } else if (roomId.startsWith("meet-")) {
+            // Meeting room. Anyone with the code can join; hosting rights
+            // are enforced per-action in routes/meetings.js rather than at
+            // the transport layer.
+            const meetingId = roomId.slice("meet-".length);
+            const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
+            if (!meeting) return replyError(ws, reqId, "That meeting no longer exists.");
+            if (meeting.status === "ENDED") return replyError(ws, reqId, "That meeting has ended.");
+          } else if (role === "host") {
+            // Livestream: only the stream's owner may broadcast.
             const stream = await prisma.livestream.findUnique({ where: { id: roomId } });
-            let userId = null;
-            try { userId = jwt.verify(data.token, process.env.JWT_SECRET).sub; } catch {}
             if (!stream || stream.hostId !== userId || stream.status !== "LIVE") {
               return replyError(ws, reqId, "You're not authorized to host this stream.");
             }
@@ -111,7 +138,13 @@ async function attachSignaling(httpServer) {
         }
 
         if (method === "produce") {
-          if (role !== "host") return replyError(ws, reqId, "Only the host can publish media.");
+          // In a livestream only the host publishes. In a call or a meeting
+          // every participant does -- blocking that here would leave people
+          // connected but permanently silent.
+          const isMultiPublisher = roomId.startsWith("call-") || roomId.startsWith("meet-");
+          if (!isMultiPublisher && role !== "host") {
+            return replyError(ws, reqId, "Only the host can publish media.");
+          }
           const transport = peer.transports.get(data.transportId);
           if (!transport) return replyError(ws, reqId, "Unknown transport.");
 
