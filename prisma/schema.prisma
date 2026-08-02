@@ -350,6 +350,13 @@ enum AdCategory {
   GENERAL
 }
 
+enum AdPaymentStatus {
+  PENDING_PAYMENT
+  PAID
+  REJECTED
+  EXPIRED
+}
+
 model Ad {
   id         String     @id @default(cuid())
   owner      User       @relation(fields: [ownerId], references: [id])
@@ -357,10 +364,39 @@ model Ad {
   category   AdCategory @default(GENERAL)
   headline   String
   body       String
+  // Legacy single image, kept so existing ads still render. New ads use
+  // the media relation below, which supports photos and video.
   imageUrl   String?
   targetUrl  String?
   active     Boolean    @default(true)
   createdAt  DateTime   @default(now())
+
+  // --- Budget & scheduling ---
+  // An ad does not serve until paymentStatus is PAID and the current date
+  // falls inside the window. Gating on payment is enforced in the serving
+  // query, not just the UI, so an unpaid ad can't be shown by calling the
+  // API directly.
+  paymentStatus AdPaymentStatus @default(PENDING_PAYMENT)
+  budgetCents   Int             @default(5000) // $50 base
+  durationDays  Int             @default(7)
+  startsAt      DateTime?
+  endsAt        DateTime?
+  // Reach tier the advertiser paid for -- caps how many people the ad is
+  // shown to, so a larger budget buys a genuinely larger audience.
+  reachCap      Int?
+  // Reference the advertiser gives you after paying, so a manual check
+  // against Stripe is possible without a webhook integration.
+  paymentRef    String?
+  paidAt        DateTime?
+  // Stripe Checkout Session id. Stored so a webhook can find the ad it
+  // belongs to, and so a session can't be replayed to pay for a second ad.
+  stripeSessionId String? @unique
+  // What Stripe actually charged, which may differ from budgetCents if
+  // anything went wrong. The ad's reach is granted on THIS figure, never on
+  // the requested budget -- otherwise a $50 payment could buy a $2000 ad.
+  amountPaidCents Int?
+
+  media      AdMedia[]
 
   // --- Targeting criteria (all optional; omitting one means "don't filter
   // on this dimension" rather than "match nobody") ---
@@ -373,6 +409,18 @@ model Ad {
   targetInterests   AdTargetInterest[]
 
   events            AdEvent[]
+}
+
+model AdMedia {
+  id        String    @id @default(cuid())
+  ad        Ad        @relation(fields: [adId], references: [id], onDelete: Cascade)
+  adId      String
+  url       String
+  kind      MediaKind
+  position  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([adId])
 }
 
 model AdTargetInterest {

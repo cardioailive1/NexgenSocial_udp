@@ -18,6 +18,10 @@ primary_region = "iad"       # change to whichever region you launch in
   MEDIASOUP_WEBRTC_PORT = "44444"
   MEDIASOUP_LISTEN_IP = "0.0.0.0"
   MEDIASOUP_WORKER_COUNT = "1"
+  # Stripe payment link shown to advertisers. Ads stay in PENDING_PAYMENT
+  # until confirmed -- a payment link alone can't verify that anyone paid,
+  # so see README "Advertising payments" before taking real money.
+  STRIPE_PAYMENT_LINK = "https://buy.stripe.com/eVq00jgRAbXLcHhbbA1oI0o"
   # MEDIASOUP_ANNOUNCED_IP is NOT set here on purpose -- set it as a secret
   # (`fly secrets set MEDIASOUP_ANNOUNCED_IP=...`) once you know your
   # app's dedicated IPv4. Leaving it as this file's default would silently

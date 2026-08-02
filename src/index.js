@@ -68,6 +68,12 @@ app.use(cors({
     callback(new Error("Not allowed by CORS"));
   },
 }));
+// Stripe verifies webhooks against the EXACT bytes it sent. express.json()
+// parses and discards the raw body, which makes signature verification
+// fail every time -- so this one route must get the raw buffer, and must
+// be mounted before the JSON parser below.
+app.use("/api/premium/stripe-webhook", express.raw({ type: "application/json" }));
+
 app.use(express.json());
 app.use(morgan("tiny"));
 

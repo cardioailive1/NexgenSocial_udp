@@ -2,7 +2,71 @@ const express = require("express");
 const prisma = require("../lib/prisma");
 const { requireAuth } = require("../middleware/auth");
 
+const multer = require("multer");
+const path = require("path");
+
 const router = express.Router();
+
+const storage = multer.diskStorage({
+  destination: path.join(__dirname, "..", "uploads"),
+  filename: (_req, file, cb) => {
+    cb(null, `ad-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname) || ""}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 200 * 1024 * 1024, files: 5 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) return cb(null, true);
+    cb(new Error("Ad creative must be a photo or video."));
+  },
+});
+
+// --- Pricing ---------------------------------------------------------------
+// $50 buys a baseline campaign. Above that, spend scales reach and duration
+// proportionally rather than through fixed tiers, so an advertiser can pick
+// any amount and any length that suits them.
+// $50 buys a fixed starter package: one day, capped audience. Everyone
+// starts there -- no choosing a budget up front. Extending is a separate,
+// later decision: pay more and the campaign gains days and reach in
+// proportion. Keeping the entry price fixed makes the offer easy to
+// understand and means an advertiser can test cheaply before committing.
+const BASE_PRICE_CENTS = 5000;      // $50
+const BASE_DURATION_DAYS = 1;
+const BASE_REACH = 1000;            // people the starter package reaches
+
+// What a given top-up buys, expressed in the same units as the base
+// package so the maths is obvious to the advertiser.
+function extensionQuote(topUpCents) {
+  const amount = Math.max(0, Math.round(Number(topUpCents) || 0));
+  const multiple = amount / BASE_PRICE_CENTS;
+  return {
+    topUpCents: amount,
+    addedDays: Math.max(0, Math.round(BASE_DURATION_DAYS * multiple)),
+    addedReach: Math.round(BASE_REACH * multiple),
+  };
+}
+
+router.get("/pricing", (req, res) => {
+  const { topUpCents } = req.query;
+  res.json({
+    basePriceCents: BASE_PRICE_CENTS,
+    baseDurationDays: BASE_DURATION_DAYS,
+    baseReach: BASE_REACH,
+    paymentUrl: process.env.STRIPE_PAYMENT_LINK || null,
+    starter: {
+      priceCents: BASE_PRICE_CENTS,
+      durationDays: BASE_DURATION_DAYS,
+      reachCap: BASE_REACH,
+    },
+    // Present when the client is previewing a top-up.
+    extension: topUpCents ? extensionQuote(topUpCents) : null,
+  });
+});
+
+module.exports.BASE_PRICE_CENTS = BASE_PRICE_CENTS;
+module.exports.BASE_DURATION_DAYS = BASE_DURATION_DAYS;
+module.exports.BASE_REACH = BASE_REACH;
 
 // Minimum number of distinct users an aggregate figure must cover before
 // it's shown to an advertiser. Below this, small audiences can be
@@ -51,9 +115,17 @@ router.get("/serve", requireAuth, async (req, res) => {
     prisma.userInterest.findMany({ where: { userId: req.userId }, select: { interestId: true } }),
   ]);
 
+  const now = new Date();
   const allAds = await prisma.ad.findMany({
-    where: { active: true },
-    include: { targetInterests: true },
+    where: {
+      active: true,
+      // Enforced here, not just in the UI: an unpaid ad must never serve,
+      // even if someone calls the API directly.
+      paymentStatus: "PAID",
+      OR: [{ startsAt: null }, { startsAt: { lte: now } }],
+      AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
+    },
+    include: { targetInterests: true, media: true },
     orderBy: { createdAt: "desc" },
     take: 100,
   });
@@ -61,18 +133,47 @@ router.get("/serve", requireAuth, async (req, res) => {
   const targetingAllowed = !!privacy?.allowInterestTargeting;
   const userInterestIds = userInterests.map((ui) => ui.interestId);
 
+  // Enforce the reach cap the advertiser paid for. Distinct impressions are
+  // counted per ad, and once an ad has been shown to as many DIFFERENT
+  // people as its cap allows, it stops serving to anyone new. Counting
+  // distinct viewers rather than raw impressions matters: otherwise one
+  // person refreshing repeatedly would burn the whole campaign.
+  const adIds = allAds.map((a) => a.id);
+  const reachedRows = adIds.length
+    ? await prisma.adEvent.findMany({
+        where: { adId: { in: adIds }, type: "IMPRESSION" },
+        distinct: ["adId", "userId"],
+        select: { adId: true, userId: true },
+      })
+    : [];
+
+  const reachByAd = new Map();
+  const seenByAd = new Map();
+  for (const row of reachedRows) {
+    reachByAd.set(row.adId, (reachByAd.get(row.adId) || 0) + 1);
+    if (row.userId === req.userId) seenByAd.set(row.adId, true);
+  }
+
+  const withinCap = (ad) => {
+    if (!ad.reachCap) return true;
+    // Someone who has already seen this ad doesn't consume new reach, so
+    // they keep seeing it -- the cap limits audience size, not frequency.
+    if (seenByAd.get(ad.id)) return true;
+    return (reachByAd.get(ad.id) || 0) < ad.reachCap;
+  };
+
   let selected;
   if (targetingAllowed) {
-    selected = allAds.filter((ad) => adMatchesUser(ad, user, userInterestIds));
+    selected = allAds.filter((ad) => withinCap(ad) && adMatchesUser(ad, user, userInterestIds));
     // If nothing matches, fall back to untargeted ads so the ad slot isn't
     // simply empty for people with sparse profiles.
     if (selected.length === 0) {
-      selected = allAds.filter((ad) => !ad.targetInterests.length && !ad.targetGenders?.length && ad.targetMinAge == null);
+      selected = allAds.filter((ad) => withinCap(ad) && !ad.targetInterests.length && !ad.targetGenders?.length && ad.targetMinAge == null);
     }
   } else {
     // No consent: only serve ads that aren't demographically targeted at all.
     selected = allAds.filter(
-      (ad) => !ad.targetInterests.length && !ad.targetGenders?.length && !ad.targetCities?.length &&
+      (ad) => withinCap(ad) && !ad.targetInterests.length && !ad.targetGenders?.length && !ad.targetCities?.length &&
               !ad.targetCountries?.length && !ad.targetRelationshipStatuses?.length &&
               ad.targetMinAge == null && ad.targetMaxAge == null
     );
@@ -85,6 +186,7 @@ router.get("/serve", requireAuth, async (req, res) => {
       headline: ad.headline,
       body: ad.body,
       imageUrl: ad.imageUrl,
+      media: ad.media || [],
       targetUrl: ad.targetUrl,
       // Surfaced so the UI can honestly tell the person why they're seeing
       // this ad, matching the "why am I seeing this" principle used in the feed.
