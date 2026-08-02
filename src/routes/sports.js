@@ -43,6 +43,12 @@ const LEAGUES = {
 
   // --- American sports ---
   nfl:  { id: "4391", label: "NFL",  sport: "American Football", verified: true, broadcastUrl: "https://www.nfl.com/schedules/" },
+  // NCAA football. These ids were NOT confirmed against TheSportsDB (their
+  // API wasn't reachable from the build environment), so they're flagged
+  // unverified -- an empty tab will say so rather than looking broken.
+  // Verify at thesportsdb.com/sport/leagues and correct if needed.
+  ncaaf: { id: "4479", label: "NCAA Football (FBS)", sport: "American Football", verified: false, broadcastUrl: "https://www.ncaa.com/scoreboard/football/fbs" },
+  bigten: { id: "4924", label: "Big Ten Conference", sport: "American Football", verified: false, broadcastUrl: "https://bigten.org/calendar.aspx?path=football" },
   nba:  { id: "4387", label: "NBA",  sport: "Basketball",        verified: true, broadcastUrl: "https://www.nba.com/schedule" },
   mlb:  { id: "4424", label: "MLB",  sport: "Baseball",          verified: true, broadcastUrl: "https://www.mlb.com/schedule" },
   nhl:  { id: "4380", label: "NHL",  sport: "Ice Hockey",        verified: true, broadcastUrl: "https://www.nhl.com/schedule" },
