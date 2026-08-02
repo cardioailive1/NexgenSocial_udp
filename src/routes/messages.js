@@ -225,9 +225,10 @@ router.get("/calls/incoming", requireAuth, async (req, res) => {
     where: {
       calleeId: req.userId,
       status: "RINGING",
-      // Anything older than 60s is a stale ring -- treat as missed rather
-      // than showing a phantom incoming call.
-      startedAt: { gte: new Date(Date.now() - 60000) },
+      // 2 minutes rather than 60s: browsers throttle timers in background
+      // tabs, so a callee whose tab isn't focused can easily miss a
+      // shorter window entirely and never see the call at all.
+      startedAt: { gte: new Date(Date.now() - 120000) },
     },
     orderBy: { startedAt: "desc" },
     include: { caller: userSelect },
@@ -256,6 +257,18 @@ router.patch("/calls/:id", requireAuth, async (req, res) => {
     include: { caller: userSelect, callee: userSelect },
   });
   res.json({ call: updated });
+});
+
+router.get("/calls/:id/details", requireAuth, async (req, res) => {
+  const call = await prisma.call.findUnique({
+    where: { id: req.params.id },
+    include: { caller: userSelect, callee: userSelect },
+  });
+  if (!call) return res.status(404).json({ error: "Call not found." });
+  if (call.callerId !== req.userId && call.calleeId !== req.userId) {
+    return res.status(403).json({ error: "You're not part of this call." });
+  }
+  res.json({ call });
 });
 
 router.get("/calls/history", requireAuth, async (req, res) => {
