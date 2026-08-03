@@ -3,6 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const prisma = require("../lib/prisma");
 const { requireAuth } = require("../middleware/auth");
+const { sendPushToUser } = require("../lib/push");
 
 const router = express.Router();
 
@@ -158,6 +159,20 @@ router.post("/:id/messages", requireAuth, upload.array("media", 10), async (req,
     }),
   ]);
 
+  // Notify the other participants, so a message lands even with the tab shut.
+  const others = await prisma.conversationParticipant.findMany({
+    where: { conversationId: req.params.id, userId: { not: req.userId } },
+    select: { userId: true },
+  });
+  for (const o of others) {
+    sendPushToUser(o.userId, {
+      type: "message",
+      title: message.sender.displayName,
+      body: message.body ? message.body.slice(0, 120) : "Sent an attachment",
+      url: "/messages",
+    }).catch(() => {});
+  }
+
   res.status(201).json({ message });
 });
 
@@ -213,6 +228,17 @@ router.post("/calls", requireAuth, async (req, res) => {
     },
     include: { caller: userSelect, callee: userSelect },
   });
+
+  // Fire-and-forget: a push failure must never stop the call from being
+  // created. The in-app poll still works regardless.
+  sendPushToUser(callee.id, {
+    type: "incoming-call",
+    title: `${call.caller.displayName} is calling`,
+    body: call.kind === "VIDEO" ? "Incoming video call" : "Incoming voice call",
+    callId: call.id,
+    url: `/call/${call.id}`,
+  }).catch((err) => console.error("Call push failed:", err.message));
+
   res.status(201).json({ call });
 });
 

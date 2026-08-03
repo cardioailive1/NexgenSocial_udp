@@ -35,6 +35,8 @@ const jobRoutes = require("./routes/jobs");
 const messageRoutes = require("./routes/messages");
 const meetingRoutes = require("./routes/meetings");
 const suggestionRoutes = require("./routes/suggestions");
+const pushRoutes = require("./routes/push");
+const { initPush } = require("./lib/push");
 const { attachSignaling } = require("./livestreamSignaling");
 
 // Belt-and-suspenders: express-async-errors covers anything thrown inside
@@ -138,6 +140,7 @@ app.use("/api/jobs", jobRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/meetings", meetingRoutes);
 app.use("/api/suggestions", suggestionRoutes);
+app.use("/api/push", pushRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);
@@ -164,6 +167,8 @@ const server = require("http").createServer(app);
 // Gating server.listen() on that finishing first meant a slow or hung
 // mediasoup init could prevent the port from ever opening at all, which is
 // worse than losing live streaming while everything else stays up.
+initPush();
+
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`NexgenSocial API listening on :${PORT}`);
 });

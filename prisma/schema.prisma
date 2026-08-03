@@ -113,6 +113,7 @@ model User {
   callsMade          Call[] @relation("CallCaller")
   callsReceived      Call[] @relation("CallCallee")
 
+  pushSubscriptions  PushSubscription[]
   meetingsHosted     Meeting[] @relation("MeetingHost")
   meetingSeats       MeetingParticipant[]
   meetingInvites     MeetingInvite[]
@@ -1277,4 +1278,25 @@ model MeetingRecording {
   createdAt  DateTime            @default(now())
 
   @@index([meetingId])
+}
+
+// --- Web Push -------------------------------------------------------------
+//
+// Lets calls and messages reach someone whose tab is closed or minimised.
+// Honest limit: the BROWSER must still be running (backgrounded is fine).
+// If it's fully quit, or swiped away on mobile, nothing is delivered --
+// only a native app can wake a device from cold. See README.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  // The browser's push service endpoint -- unique per browser per device,
+  // so one person can legitimately have several.
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
