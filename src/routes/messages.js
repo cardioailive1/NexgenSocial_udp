@@ -4,6 +4,7 @@ const path = require("path");
 const prisma = require("../lib/prisma");
 const { requireAuth } = require("../middleware/auth");
 const { sendPushToUser } = require("../lib/push");
+const { sendApnsVoIPCall, sendApnsAlert } = require("../lib/apns");
 
 const router = express.Router();
 
@@ -165,10 +166,16 @@ router.post("/:id/messages", requireAuth, upload.array("media", 10), async (req,
     select: { userId: true },
   });
   for (const o of others) {
+    const preview = message.body ? message.body.slice(0, 120) : "Sent an attachment";
     sendPushToUser(o.userId, {
       type: "message",
       title: message.sender.displayName,
-      body: message.body ? message.body.slice(0, 120) : "Sent an attachment",
+      body: preview,
+      url: "/messages",
+    }).catch(() => {});
+    sendApnsAlert(o.userId, {
+      title: message.sender.displayName,
+      body: preview,
       url: "/messages",
     }).catch(() => {});
   }
@@ -231,13 +238,22 @@ router.post("/calls", requireAuth, async (req, res) => {
 
   // Fire-and-forget: a push failure must never stop the call from being
   // created. The in-app poll still works regardless.
+  // Both channels fire: web push for browsers, VoIP push for the iOS app.
+  // A person may legitimately be reachable on both, and sending to one
+  // that isn't registered is a cheap no-op.
   sendPushToUser(callee.id, {
     type: "incoming-call",
     title: `${call.caller.displayName} is calling`,
     body: call.kind === "VIDEO" ? "Incoming video call" : "Incoming voice call",
     callId: call.id,
     url: `/call/${call.id}`,
-  }).catch((err) => console.error("Call push failed:", err.message));
+  }).catch((err) => console.error("Web call push failed:", err.message));
+
+  sendApnsVoIPCall(callee.id, {
+    callId: call.id,
+    callerName: call.caller.displayName,
+    kind: call.kind,
+  }).catch((err) => console.error("VoIP call push failed:", err.message));
 
   res.status(201).json({ call });
 });

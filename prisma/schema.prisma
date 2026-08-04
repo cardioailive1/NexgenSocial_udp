@@ -114,6 +114,7 @@ model User {
   callsReceived      Call[] @relation("CallCallee")
 
   pushSubscriptions  PushSubscription[]
+  apnsDevices        ApnsDevice[]
   meetingsHosted     Meeting[] @relation("MeetingHost")
   meetingSeats       MeetingParticipant[]
   meetingInvites     MeetingInvite[]
@@ -1286,6 +1287,38 @@ model MeetingRecording {
 // Honest limit: the BROWSER must still be running (backgrounded is fine).
 // If it's fully quit, or swiped away on mobile, nothing is delivered --
 // only a native app can wake a device from cold. See README.
+enum ApnsEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
+enum ApnsTokenKind {
+  ALERT
+  VOIP
+}
+
+// APNs device tokens for the native iOS app.
+//
+// ALERT and VOIP tokens are genuinely different values from Apple and must
+// be stored separately -- sending a call push to an alert token silently
+// fails, which is a miserable bug to track down. Environment matters for
+// the same reason: a sandbox token rejected by the production gateway
+// produces a BadDeviceToken error, not a delivery.
+model ApnsDevice {
+  id          String          @id @default(cuid())
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  token       String
+  kind        ApnsTokenKind   @default(ALERT)
+  environment ApnsEnvironment @default(PRODUCTION)
+  bundleId    String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([token, kind])
+  @@index([userId])
+}
+
 model PushSubscription {
   id        String   @id @default(cuid())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

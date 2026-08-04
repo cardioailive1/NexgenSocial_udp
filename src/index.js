@@ -37,6 +37,7 @@ const meetingRoutes = require("./routes/meetings");
 const suggestionRoutes = require("./routes/suggestions");
 const pushRoutes = require("./routes/push");
 const { initPush } = require("./lib/push");
+const { initApns } = require("./lib/apns");
 const { attachSignaling } = require("./livestreamSignaling");
 
 // Belt-and-suspenders: express-async-errors covers anything thrown inside
@@ -168,6 +169,7 @@ const server = require("http").createServer(app);
 // mediasoup init could prevent the port from ever opening at all, which is
 // worse than losing live streaming while everything else stays up.
 initPush();
+initApns();
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`NexgenSocial API listening on :${PORT}`);
